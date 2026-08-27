@@ -39,13 +39,12 @@ ns8-sentinel-fornitori/
 ├── build-images.sh                     # build + push immagine app su ghcr.io
 ├── imageroot/
 │   ├── .images                         # immagini di terze parti da scaricare
+│   ├── etc/state-include.conf          # cosa include il backup nativo NS8
 │   ├── systemd/user/
 │   │   ├── sentinel-app.service
 │   │   ├── sentinel-postgres.service
 │   │   ├── sentinel-minio.service
-│   │   ├── sentinel-clamav.service
-│   │   ├── sentinel-backup.service
-│   │   └── sentinel-backup.timer
+│   │   └── sentinel-clamav.service
 │   ├── actions/
 │   │   ├── configure-module/10configure
 │   │   └── get-configuration/10get
@@ -53,6 +52,9 @@ ns8-sentinel-fornitori/
 │   └── ui/public/metadata.json
 └── docs/mappatura-compose-ns8.md
 ```
+
+Non c'è più una unit/timer di backup dedicata: il backup usa il meccanismo
+nativo di NS8 (vedi §3.3bis).
 
 Manca ancora tutto ciò che il template ufficiale `ns8-kickstart` genera in
 automatico (azioni base ereditate, test Robot Framework, workflow CI,
@@ -84,32 +86,40 @@ partire dal template ufficiale e innestarci questi file.
 - Il Dockerfile dell'applicazione Next.js/vinext (quello che compila il
   portale, non quello di backup incluso in questo progetto) va copiato/
   referenziato come sorgente per `build-images.sh` (variabile `APP_SRC_DIR`).
-- Le migrazioni (`docker/migrate.mjs`) restano nell'immagine app: vengono
-  invocate da `imageroot/update-module.d/10migrate` e vanno richiamate anche
-  in `configure-module` al primo avvio (da aggiungere: qui è stato lasciato
-  solo l'avvio dei servizi, la prima migrazione va eseguita esplicitamente
-  la prima volta, con lo stesso comando usato in `10migrate`).
+- Le migrazioni (`docker/migrate.mjs`) e il bootstrap admin
+  (`docker/bootstrap-admin.mjs`) restano nell'immagine app: vengono
+  invocati sia da `configure-module/10configure` (primo avvio) sia da
+  `imageroot/update-module.d/10migrate` (aggiornamenti). **Verificate il
+  nome esatto** della variabile d'ambiente che contiene l'immagine
+  principale del modulo (nello scaffold è dato per scontato `APP_IMAGE`,
+  ma l'azione core `create-module` potrebbe usare un nome diverso, es.
+  `IMAGE_URL` — correggetelo in `10configure` e `10migrate` di conseguenza).
 
 ### 3.3 Sostituire Caddy con Traefik + Let's Encrypt di NS8
 
-Questa è la parte più delicata e **non è ancora implementata** in questo
-scaffold (vedi TODO in `configure-module/10configure`). In sintesi, sui
-moduli web NS8:
+Il container applicativo si pubblica **solo su loopback**
+(`127.0.0.1:${TCP_PORT}`, già impostato in `sentinel-app.service`).
+`configure-module/10configure` registra la route pubblica chiamando
+`agent.set_route()`, secondo l'API documentata in
+<https://nethserver.github.io/ns8-core/modules/certificates/>:
 
-- il container applicativo si pubblica **solo su loopback**
-  (`127.0.0.1:${TCP_PORT}`, come già fatto in `sentinel-app.service`);
-- il Traefik del cluster instrada il traffico pubblico verso quella porta
-  in base al dominio configurato;
-- il certificato TLS per il dominio è gestito dal modulo `letsencrypt` del
-  cluster, non da Caddy.
+```python
+agent.set_route({
+    "instance": os.environ["MODULE_ID"],
+    "url": f"http://127.0.0.1:{tcp_port}",
+    "host": domain,
+    "lets_encrypt": True,
+    "http2https": True,
+})
+```
 
-Il modo esatto per registrare la route (evento Redis, azione dedicata,
-opzioni di dominio/percorso) va copiato da un modulo NS8 reale con interfaccia
-web, ad esempio i repository pubblici `ns8-nextcloud` o `ns8-webtop` su
-GitHub — guardate come i loro `configure-module` registrano il dominio e
-come i loro `.metadata`/label dichiarano la necessità del proxy. Non
-inventate qui la sintassi senza verificarla sul modulo di riferimento e
-sulla pagina "Network" del developer manual (<https://nethserver.github.io/ns8-core/modules/network/>).
+Questo dice a Traefik di instradare `domain` verso l'app e richiede/rinnova
+il certificato via Let's Encrypt: non serve più Caddy né gestire i
+certificati a mano. Va comunque collaudato su un cluster reale — in
+particolare cosa succede se `set_route` fallisce (validazione remota Let's
+Encrypt che non va a buon fine: per il comportamento di default, che aborta
+il processo, vs `error_passthrough=False` per gestirlo voi, vedi la pagina
+sopra).
 
 ### 3.4 Personalizzare `metadata.json`
 
@@ -147,13 +157,11 @@ all'indirizzo configurato una volta collegata a Traefik.
 
 - Verifica: `curl -fsS https://<dominio>/api/health` (lo stesso endpoint già
   usato nel pacchetto Docker originale).
-- Backup: la piattaforma NS8 ha un meccanismo di backup/restore a livello di
-  modulo basato sui volumi Podman: prima di reinventare uno script come
-  `docker/backup.sh`, verificate sul developer manual
-  (sezione "Backup and Restore") se potete appoggiarvi al meccanismo comune
-  invece di gestirlo con la unit `sentinel-backup.timer` inclusa qui (che è
-  un fallback funzionante ma più manuale, modellato sul vecchio
-  `docker/backup.sh`).
+- Backup: **non serve più uno script custom.** Il core NS8 esegue backup
+  programmati basati su Restic per l'intero modulo; `imageroot/etc/state-include.conf`
+  dice cosa includere (qui: i volumi Postgres e MinIO). Il ripristino è
+  `api-cli run cluster/restore-module --data '{"node":1,"repository":"<UUID>","path":"<module/path>","snapshot":""}'`.
+  Il volume ClamAV (solo definizioni virus) è escluso di proposito.
 - Aggiornamento: `update-module <module_id> ghcr.io/<tuo-org>/sentinel-fornitori:<nuova-versione>`
   esegue in automatico gli script in `imageroot/update-module.d/` (qui:
   `10migrate`).
@@ -163,25 +171,26 @@ all'indirizzo configurato una volta collegata a Traefik.
 Questo scaffold è stato scritto a tavolino confrontando la documentazione
 ufficiale NS8 (developer manual su nethserver.github.io/ns8-core e il
 template ns8-kickstart) con lo stack Docker Compose esistente, **senza un
-server NS8 reale su cui testarlo**. Prima di installarlo su un cliente,
-verificate/completate almeno:
+server NS8 reale su cui testarlo**. Rispetto alla prima versione, la
+registrazione Traefik/Let's Encrypt (`agent.set_route`), la creazione del
+bucket MinIO e il backup sono stati risolti con API/meccanismi confermati
+dalla documentazione ufficiale (non più TODO generici). Restano da
+verificare/completare:
 
-1. **Registrazione route Traefik + certificato Let's Encrypt** (§3.3): è
-   l'unico punto davvero non scritto, copiate la logica da un modulo reale.
-2. **Container `minio-init`** (creazione bucket con versioning/object lock):
-   nello scaffold è solo accennato come `ExecStartPost=ensure-minio-bucket`
-   in `sentinel-minio.service`; lo script `runagent ensure-minio-bucket` va
-   scritto (equivalente del servizio `minio-init` del `compose.yml`
-   originale, che lancia `mc mb --with-lock` e `mc version enable`).
-3. **Primo bootstrap admin**: `docker/bootstrap-admin.mjs` va richiamato la
-   prima volta che il modulo viene configurato (in `configure-module`, dopo
-   il primo avvio di Postgres), non solo nelle migrazioni successive.
-4. **Azioni backup-module / restore-module** esplicite, se decidete di non
-   usare il meccanismo generico di NS8: al momento c'è solo un timer che
-   richiama `runagent run-backup`, ma lo step `run-backup` stesso (dump
-   Postgres + sync bucket MinIO, equivalente di `docker/backup.sh`) va
-   scritto.
-5. **Test end-to-end** su un cluster NS8 reale (installazione, riavvio nodo,
+1. **Nome della variabile d'ambiente dell'immagine principale** (`APP_IMAGE`
+   nello scaffold): controllate cosa imposta davvero l'azione core
+   `create-module` per l'immagine dichiarata nel Containerfile/label del
+   modulo, e allineate `configure-module/10configure` e
+   `update-module.d/10migrate`.
+2. **Comportamento di `agent.set_route` in caso di errore Let's Encrypt**
+   (per default aborta il processo di configurazione): decidete se va bene
+   così o se preferite gestirlo con `error_passthrough=False`.
+3. **Wait-loop di readiness** in `sentinel-postgres.service` e
+   `sentinel-minio.service`: gli `ExecStartPost` inclusi sono script bash
+   diretti (non azioni NS8), semplici ma da collaudare con carichi/tempi di
+   avvio reali (i timeout di 30s potrebbero essere insufficienti in
+   ambienti lenti).
+4. **Test end-to-end** su un cluster NS8 reale (installazione, riavvio nodo,
    backup/restore, update, rimozione) prima di consegnare al cliente.
 
 ## 5. Riferimenti utili

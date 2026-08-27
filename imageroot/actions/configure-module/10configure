@@ -3,14 +3,15 @@
 # Azione configure-module: valida l'input ricevuto dalla cluster-admin (o da
 # CLI) e persiste la configurazione dell'installazione SENTINEL Fornitori.
 #
-# ATTENZIONE: scheletro di partenza. Va verificato/adattato contro la
-# documentazione ufficiale "New module tutorial" e "Agent" del developer
-# manual NS8, e confrontato con un modulo HTTP reale (es. ns8-nextcloud) per
-# la parte di allocazione porte e registrazione della route su Traefik, che
-# qui non è ancora implementata nel dettaglio.
+# La registrazione della route Traefik/Let's Encrypt (agent.set_route) segue
+# l'esempio documentato in
+# https://nethserver.github.io/ns8-core/modules/certificates/ - verificata,
+# non congetturata. Il resto (bootstrap admin, prima migrazione) va comunque
+# collaudato su un cluster reale prima della produzione.
 
 import agent
 import json
+import os
 import sys
 import secrets
 
@@ -53,11 +54,8 @@ env = {
 for key, value in env.items():
     agent.set_env(key, value)
 
-# TODO: registrare la route HTTP/HTTPS su Traefik per `domain` -> TCP_PORT e
-# richiedere/rinnovare il certificato tramite il modulo letsencrypt, secondo
-# la convenzione usata dagli altri moduli web (vedi doc "Network").
-
-# Abilita e avvia le unit systemd del modulo.
+# Abilita e avvia le unit systemd del modulo (Postgres/MinIO/ClamAV prima
+# dell'app, come dichiarato in sentinel-app.service con After=/Wants=).
 agent.run_helper("systemctl", "--user", "daemon-reload")
 for unit in (
     "sentinel-postgres.service",
@@ -67,6 +65,43 @@ for unit in (
 ):
     agent.run_helper("systemctl", "--user", "enable", "--now", unit)
 
-agent.run_helper("systemctl", "--user", "enable", "--now", "sentinel-backup.timer")
+# Prima configurazione: applica le migrazioni e crea l'utente amministratore
+# iniziale (equivalenti di docker/migrate.mjs e docker/bootstrap-admin.mjs
+# nello stack Docker Compose originale). Le riesecuzioni successive sono
+# idempotenti quanto lo erano gli script originali.
+#
+# NOTA: APP_IMAGE qui è dato per scontato come variabile d'ambiente presente
+# (l'immagine principale del modulo). Verificate il nome esatto della
+# variabile impostata dall'azione core create-module per l'immagine primaria
+# del modulo (potrebbe chiamarsi diversamente, es. IMAGE_URL) e correggetelo
+# prima di usare questo scaffold.
+app_image = os.environ.get("APP_IMAGE", "")
+state_env_file = os.path.join(os.environ["AGENT_STATE_DIR"], "environment")
+
+agent.run_helper(
+    "podman", "run", "--rm",
+    "--env-file", state_env_file,
+    "--network", "container:sentinel-postgres",
+    app_image,
+    "node", "docker/migrate.mjs",
+)
+agent.run_helper(
+    "podman", "run", "--rm",
+    "--env-file", state_env_file,
+    "--network", "container:sentinel-postgres",
+    app_image,
+    "node", "docker/bootstrap-admin.mjs",
+)
+
+# Registra la route HTTPS su Traefik e richiede il certificato Let's Encrypt
+# per il dominio configurato (API confermata dal developer manual, sezione
+# "TLS certificates" - modules/certificates/).
+agent.set_route({
+    "instance": os.environ["MODULE_ID"],
+    "url": f"http://127.0.0.1:{tcp_port}",
+    "host": domain,
+    "lets_encrypt": True,
+    "http2https": True,
+})
 
 print(json.dumps({"status": "ok", "domain": domain, "tcp_port": tcp_port}))

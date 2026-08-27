@@ -17,7 +17,7 @@ ExecStart=/usr/bin/podman run --conmon-pidfile %t/sentinel-postgres.pid \
     --volume sentinel-postgres-data:/var/lib/postgresql/data:Z \
     --publish 127.0.0.1:${POSTGRES_TCP_PORT}:5432 \
     ${POSTGRES_IMAGE}
-ExecStartPost=/usr/local/bin/runagent wait-postgres-ready
+ExecStartPost=/bin/bash -c 'for i in $(seq 1 30); do podman exec sentinel-postgres pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" && exit 0; sleep 1; done; exit 1'
 ExecStop=/usr/bin/podman stop --ignore --cidfile %t/sentinel-postgres.ctr-id -t 10
 ExecStopPost=/usr/bin/podman rm --ignore -f --cidfile %t/sentinel-postgres.ctr-id
 PIDFile=%t/sentinel-postgres.pid
