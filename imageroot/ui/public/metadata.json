@@ -1,0 +1,15 @@
+{
+  "name": "SENTINEL Fornitori",
+  "upstream_name": "SENTINEL Fornitori 1.0",
+  "description": {
+    "en": "Supply chain assurance portal: supplier qualification, scoring and evidence management",
+    "it": "Portale di qualifica fornitori: gestione anagrafica, scoring, scadenze e documenti/evidenze"
+  },
+  "categories": ["business", "documents"],
+  "authors": [{ "name": "Startapp", "email": "info@startappitalia.it" }],
+  "docs": {
+    "documentation_url": "https://github.com/<tuo-org>/ns8-sentinel-fornitori/blob/main/README.md",
+    "code_url": "https://github.com/<tuo-org>/ns8-sentinel-fornitori"
+  },
+  "source": "ghcr.io/<tuo-org>/sentinel-fornitori"
+}

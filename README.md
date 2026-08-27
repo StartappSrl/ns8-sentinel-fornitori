@@ -1,100 +1,192 @@
-# ns8-kickstart
+# SENTINEL Fornitori → modulo nativo NethServer 8
 
-This is a template module for [NethServer 8](https://github.com/NethServer/ns8-core).
-To start a new module from it:
+Guida e scaffold per trasformare il pacchetto Docker Compose "SENTINEL
+Fornitori" (portale + PostgreSQL + MinIO + ClamAV + Caddy + backup) in un
+modulo NS8 installabile e configurabile dalla GUI cluster-admin
+(`add-module`, voce di menu, pagina di configurazione).
 
-1. Click on [Use this template](https://github.com/NethServer/ns8-kickstart/generate).
-   Name your repo with `ns8-` prefix (e.g. `ns8-mymodule`). 
-   Do not end your module name with a number, like ~~`ns8-baaad2`~~!
+Il file `DOCKER-INSTALL.md` del progetto originale segnalava già questo
+passaggio come "fase successiva": questo scaffold è il punto di partenza per
+farlo, non un modulo pronto per la produzione. Vedi la sezione "Cosa manca
+ancora / da verificare" in fondo.
 
-1. Clone the repository, enter the cloned directory and
-   [configure your GIT identity](https://git-scm.com/book/en/v2/Getting-Started-First-Time-Git-Setup#_your_identity)
+## 1. Perché non basta "docker compose up" su NS8
 
-1. Rename some references inside the repo:
-   ```
-   modulename=$(basename $(pwd) | sed 's/^ns8-//')
-   git mv imageroot/systemd/user/kickstart.service imageroot/systemd/user/${modulename}.service
-   git mv tests/kickstart.robot tests/${modulename}.robot
-   sed -i "s/kickstart/${modulename}/g" $(find .github/ .devcontainer/ * -type f)
-   git commit -a -m "Repository initialization"
-   ```
+NethServer 8 non usa Docker Compose. Ogni modulo è un pacchetto distribuito
+come immagine container (Podman, rootless per default), con:
 
-1. Edit this `README.md` file, by replacing this section with your module
-   description
+- **unit systemd utente** che avviano/fermano i container (al posto dei
+  `services:` di Compose);
+- un **agente** che espone "azioni" (install, configure-module,
+  get-configuration, update, backup, restore, remove) invocabili da CLI o
+  dalla cluster-admin;
+- **Traefik** come reverse proxy HTTPS condiviso da tutto il cluster (al
+  posto del Caddy dedicato incluso nel pacchetto Docker);
+- un **file `ui/public/metadata.json`** che fa comparire il modulo con nome,
+  icona e descrizione nel Software Center / cluster-admin.
 
-1. Adjust `.github/workflows` to your needs. `clean-registry.yml` might
-   need the proper list of image names to work correctly. Unused workflows
-   can be disabled from the GitHub Actions interface.
+Il vostro stack ha 5 servizi (app, postgres, minio, clamav, backup): la
+soluzione più semplice è impacchettarli **tutti in un unico modulo NS8**
+("sentinel-fornitori"), con più container gestiti dalle stesse unit
+systemd del modulo — esattamente come fanno altri moduli NS8 con più
+container (es. quelli che affiancano un Redis o un database al servizio
+principale). Non è necessario spezzarli in moduli NS8 separati.
 
-1. Commit and push your local changes
+## 2. Struttura di questo scaffold
 
-## Install
+```
+ns8-sentinel-fornitori/
+├── build-images.sh                     # build + push immagine app su ghcr.io
+├── imageroot/
+│   ├── .images                         # immagini di terze parti da scaricare
+│   ├── systemd/user/
+│   │   ├── sentinel-app.service
+│   │   ├── sentinel-postgres.service
+│   │   ├── sentinel-minio.service
+│   │   ├── sentinel-clamav.service
+│   │   ├── sentinel-backup.service
+│   │   └── sentinel-backup.timer
+│   ├── actions/
+│   │   ├── configure-module/10configure
+│   │   └── get-configuration/10get
+│   ├── update-module.d/10migrate
+│   └── ui/public/metadata.json
+└── docs/mappatura-compose-ns8.md
+```
 
-Instantiate the module with:
+Manca ancora tutto ciò che il template ufficiale `ns8-kickstart` genera in
+automatico (azioni base ereditate, test Robot Framework, workflow CI,
+Containerfile del modulo, label `org.nethserver.*`). Il passo 3 spiega come
+partire dal template ufficiale e innestarci questi file.
 
-    add-module ghcr.io/nethserver/kickstart:latest 1
+## 3. Procedura passo-passo (da eseguire voi, sul vostro ambiente)
 
-The output of the command will return the instance name.
-Output example:
+### 3.1 Preparare il repository del modulo
 
-    {"module_id": "kickstart1", "image_name": "kickstart", "image_url": "ghcr.io/nethserver/kickstart:latest"}
+1. Andate su <https://github.com/NethServer/ns8-kickstart>, "Use this
+   template" → create un repo chiamato `ns8-sentinel-fornitori` (deve
+   iniziare per `ns8-` e non finire con un numero).
+2. Clonatelo in locale e copiateci sopra i file di questo scaffold
+   (`imageroot/`, `build-images.sh`), **unendoli** con quanto già presente
+   nel template (non sovrascrivete le azioni base del kickstart).
+3. Nel Containerfile/label del modulo principale (generato dal kickstart),
+   aggiungete il label `org.nethserver.images` con il contenuto del file
+   `imageroot/.images` di questo scaffold (immagini Postgres/MinIO/mc/ClamAV):
+   verranno scaricate in automatico dall'azione core `create-module` e
+   trasformate in variabili d'ambiente (`POSTGRES_IMAGE`, `MINIO_IMAGE`, ...)
+   usate dalle unit systemd incluse qui.
+4. Aggiungete anche il label `org.nethserver.tcp-ports-demand=4` (una porta
+   per app, postgres, minio, clamav — vedi `configure-module/10configure`,
+   che chiama `agent.allocate_ports(4, "tcp")`).
 
-## Configure
+### 3.2 Portare dentro il codice dell'app
 
-Let's assume that the kickstart instance is named `kickstart1`.
+- Il Dockerfile dell'applicazione Next.js/vinext (quello che compila il
+  portale, non quello di backup incluso in questo progetto) va copiato/
+  referenziato come sorgente per `build-images.sh` (variabile `APP_SRC_DIR`).
+- Le migrazioni (`docker/migrate.mjs`) restano nell'immagine app: vengono
+  invocate da `imageroot/update-module.d/10migrate` e vanno richiamate anche
+  in `configure-module` al primo avvio (da aggiungere: qui è stato lasciato
+  solo l'avvio dei servizi, la prima migrazione va eseguita esplicitamente
+  la prima volta, con lo stesso comando usato in `10migrate`).
 
-Launch `configure-module`, by setting the following parameters:
-- `<MODULE_PARAM1_NAME>`: <MODULE_PARAM1_DESCRIPTION>
-- `<MODULE_PARAM2_NAME>`: <MODULE_PARAM2_DESCRIPTION>
-- ...
+### 3.3 Sostituire Caddy con Traefik + Let's Encrypt di NS8
 
-Example:
+Questa è la parte più delicata e **non è ancora implementata** in questo
+scaffold (vedi TODO in `configure-module/10configure`). In sintesi, sui
+moduli web NS8:
 
-    api-cli run module/kickstart1/configure-module --data '{}'
+- il container applicativo si pubblica **solo su loopback**
+  (`127.0.0.1:${TCP_PORT}`, come già fatto in `sentinel-app.service`);
+- il Traefik del cluster instrada il traffico pubblico verso quella porta
+  in base al dominio configurato;
+- il certificato TLS per il dominio è gestito dal modulo `letsencrypt` del
+  cluster, non da Caddy.
 
-The above command will:
-- start and configure the kickstart instance
-- (describe configuration process)
-- ...
+Il modo esatto per registrare la route (evento Redis, azione dedicata,
+opzioni di dominio/percorso) va copiato da un modulo NS8 reale con interfaccia
+web, ad esempio i repository pubblici `ns8-nextcloud` o `ns8-webtop` su
+GitHub — guardate come i loro `configure-module` registrano il dominio e
+come i loro `.metadata`/label dichiarano la necessità del proxy. Non
+inventate qui la sintassi senza verificarla sul modulo di riferimento e
+sulla pagina "Network" del developer manual (<https://nethserver.github.io/ns8-core/modules/network/>).
 
-Send a test HTTP request to the kickstart backend service:
+### 3.4 Personalizzare `metadata.json`
 
-    curl http://127.0.0.1/kickstart/
+Aprite `imageroot/ui/public/metadata.json` e sostituite `<tuo-org>` con
+l'organizzazione GitHub/registro reale, aggiungete un logo in
+`imageroot/ui/src/assets/module_default_logo.png` (dimensioni secondo le
+convenzioni del kickstart).
 
-## Smarthost setting discovery
+### 3.5 Build e pubblicazione delle immagini
 
-Some configuration settings, like the smarthost setup, are not part of the
-`configure-module` action input: they are discovered by looking at some
-Redis keys.  To ensure the module is always up-to-date with the
-centralized [smarthost
-setup](https://nethserver.github.io/ns8-core/core/smarthost/) every time
-kickstart starts, the command `bin/discover-smarthost` runs and refreshes
-the `state/smarthost.env` file with fresh values from Redis.
+```sh
+export IMAGE_REPOBASE=ghcr.io/<tuo-org>
+export APP_SRC_DIR=/percorso/al/repo/app-sentinel   # il Dockerfile Next.js
+./build-images.sh
+```
 
-Furthermore if smarthost setup is changed when kickstart is already
-running, the event handler `events/smarthost-changed/10reload_services`
-restarts the main module service.
+Verificate che l'immagine sia pubblica (o che il server NethServer8 abbia le
+credenziali per accedere al registro privato) prima di installarla.
 
-See also the `systemd/user/kickstart.service` file.
+### 3.6 Installazione sul server NethServer8 (da voi, via SSH)
 
-This setting discovery is just an example to understand how the module is
-expected to work: it can be rewritten or discarded completely.
+Sul nodo leader del cluster NS8:
 
-## Uninstall
+```sh
+add-module ghcr.io/<tuo-org>/sentinel-fornitori:latest 1
+```
 
-To uninstall the instance:
+Poi, dalla GUI cluster-admin (`https://<server>/cluster-admin`), aprite il
+modulo appena installato e completate la configurazione (dominio, email
+amministratore, ecc.) — questo richiama l'azione `configure-module` che
+avete personalizzato al punto 3.1-3.3. L'applicazione sarà raggiungibile
+all'indirizzo configurato una volta collegata a Traefik.
 
-    remove-module --no-preserve kickstart1
+### 3.7 Verifica, backup, aggiornamento
 
-## Running tests locally
+- Verifica: `curl -fsS https://<dominio>/api/health` (lo stesso endpoint già
+  usato nel pacchetto Docker originale).
+- Backup: la piattaforma NS8 ha un meccanismo di backup/restore a livello di
+  modulo basato sui volumi Podman: prima di reinventare uno script come
+  `docker/backup.sh`, verificate sul developer manual
+  (sezione "Backup and Restore") se potete appoggiarvi al meccanismo comune
+  invece di gestirlo con la unit `sentinel-backup.timer` inclusa qui (che è
+  un fallback funzionante ma più manuale, modellato sul vecchio
+  `docker/backup.sh`).
+- Aggiornamento: `update-module <module_id> ghcr.io/<tuo-org>/sentinel-fornitori:<nuova-versione>`
+  esegue in automatico gli script in `imageroot/update-module.d/` (qui:
+  `10migrate`).
 
-This module uses the NS8 standard testing infrastructure. For instructions on how to run the test suite locally, refer to the [Running tests locally](https://github.com/NethServer/ns8-github-actions/blob/v1/README.md#running-tests-locally) section of the ns8-github-actions README.
+## 4. Cosa manca ancora / da verificare prima della produzione
 
-## UI translation
+Questo scaffold è stato scritto a tavolino confrontando la documentazione
+ufficiale NS8 (developer manual su nethserver.github.io/ns8-core e il
+template ns8-kickstart) con lo stack Docker Compose esistente, **senza un
+server NS8 reale su cui testarlo**. Prima di installarlo su un cliente,
+verificate/completate almeno:
 
-Translated with [Weblate](https://hosted.weblate.org/projects/ns8/).
+1. **Registrazione route Traefik + certificato Let's Encrypt** (§3.3): è
+   l'unico punto davvero non scritto, copiate la logica da un modulo reale.
+2. **Container `minio-init`** (creazione bucket con versioning/object lock):
+   nello scaffold è solo accennato come `ExecStartPost=ensure-minio-bucket`
+   in `sentinel-minio.service`; lo script `runagent ensure-minio-bucket` va
+   scritto (equivalente del servizio `minio-init` del `compose.yml`
+   originale, che lancia `mc mb --with-lock` e `mc version enable`).
+3. **Primo bootstrap admin**: `docker/bootstrap-admin.mjs` va richiamato la
+   prima volta che il modulo viene configurato (in `configure-module`, dopo
+   il primo avvio di Postgres), non solo nelle migrazioni successive.
+4. **Azioni backup-module / restore-module** esplicite, se decidete di non
+   usare il meccanismo generico di NS8: al momento c'è solo un timer che
+   richiama `runagent run-backup`, ma lo step `run-backup` stesso (dump
+   Postgres + sync bucket MinIO, equivalente di `docker/backup.sh`) va
+   scritto.
+5. **Test end-to-end** su un cluster NS8 reale (installazione, riavvio nodo,
+   backup/restore, update, rimozione) prima di consegnare al cliente.
 
-To setup the translation process:
+## 5. Riferimenti utili
 
-- add [GitHub Weblate app](https://docs.weblate.org/en/latest/admin/continuous.html#github-setup) to your repository
-- add your repository to [hosted.weblate.org]((https://hosted.weblate.org) or ask a NethServer developer to add it to ns8 Weblate project
+- Developer manual NS8: <https://nethserver.github.io/ns8-core/>
+- Tutorial nuovo modulo: <https://nethserver.github.io/ns8-core/modules/new_module/>
+- Template ufficiale: <https://github.com/NethServer/ns8-kickstart>
+- Esempio reale con unit systemd Podman: <https://github.com/NethServer/ns8-dokuwiki>

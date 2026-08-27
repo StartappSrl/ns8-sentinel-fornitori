@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+#
+# Azione configure-module: valida l'input ricevuto dalla cluster-admin (o da
+# CLI) e persiste la configurazione dell'installazione SENTINEL Fornitori.
+#
+# ATTENZIONE: scheletro di partenza. Va verificato/adattato contro la
+# documentazione ufficiale "New module tutorial" e "Agent" del developer
+# manual NS8, e confrontato con un modulo HTTP reale (es. ns8-nextcloud) per
+# la parte di allocazione porte e registrazione della route su Traefik, che
+# qui non è ancora implementata nel dettaglio.
+
+import agent
+import json
+import sys
+import secrets
+
+request = json.load(sys.stdin)
+
+domain = request.get("domain")              # es. fornitori.cliente.it
+customer_name = request.get("customer_name")
+installation_id = request.get("installation_id")
+admin_email = request.get("admin_email")
+admin_password = request.get("admin_password")
+
+if not domain:
+    sys.exit(1)  # dominio obbligatorio
+
+# Alloca una porta TCP per l'app (se non già allocata in precedenza) e una
+# per ciascun servizio di backend che deve restare raggiungibile solo in
+# loopback (Postgres, MinIO, ClamAV). Vedi doc "Port allocation".
+ports = agent.allocate_ports(4, "tcp")
+tcp_port, postgres_port, minio_port, clamav_port = ports
+
+env = {
+    "APP_DOMAIN": domain,
+    "CUSTOMER_NAME": customer_name or "",
+    "INSTALLATION_ID": installation_id or "",
+    "ADMIN_EMAIL": admin_email or "",
+    "ADMIN_PASSWORD": admin_password or secrets.token_urlsafe(24),
+    "SESSION_SECRET": secrets.token_hex(48),
+    "TCP_PORT": str(tcp_port),
+    "POSTGRES_TCP_PORT": str(postgres_port),
+    "MINIO_TCP_PORT": str(minio_port),
+    "CLAMAV_TCP_PORT": str(clamav_port),
+    "POSTGRES_DB": "sentinel",
+    "POSTGRES_USER": "sentinel",
+    "POSTGRES_PASSWORD": secrets.token_hex(32),
+    "MINIO_ROOT_USER": "sentinel-storage",
+    "MINIO_ROOT_PASSWORD": secrets.token_hex(32),
+    "MINIO_BUCKET": "sentinel-evidence",
+}
+
+for key, value in env.items():
+    agent.set_env(key, value)
+
+# TODO: registrare la route HTTP/HTTPS su Traefik per `domain` -> TCP_PORT e
+# richiedere/rinnovare il certificato tramite il modulo letsencrypt, secondo
+# la convenzione usata dagli altri moduli web (vedi doc "Network").
+
+# Abilita e avvia le unit systemd del modulo.
+agent.run_helper("systemctl", "--user", "daemon-reload")
+for unit in (
+    "sentinel-postgres.service",
+    "sentinel-minio.service",
+    "sentinel-clamav.service",
+    "sentinel-app.service",
+):
+    agent.run_helper("systemctl", "--user", "enable", "--now", unit)
+
+agent.run_helper("systemctl", "--user", "enable", "--now", "sentinel-backup.timer")
+
+print(json.dumps({"status": "ok", "domain": domain, "tcp_port": tcp_port}))

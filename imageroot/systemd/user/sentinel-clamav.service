@@ -1,0 +1,23 @@
+[Unit]
+Description=SENTINEL Fornitori - ClamAV (scansione allegati)
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+EnvironmentFile=%S/state/environment
+WorkingDirectory=%S/state
+Restart=always
+ExecStartPre=/bin/rm -f %t/sentinel-clamav.pid %t/sentinel-clamav.ctr-id
+ExecStart=/usr/bin/podman run --conmon-pidfile %t/sentinel-clamav.pid \
+    --cidfile %t/sentinel-clamav.ctr-id \
+    --cgroups=no-conmon \
+    --replace --name sentinel-clamav -d \
+    --volume sentinel-clamav-data:/var/lib/clamav:Z \
+    --publish 127.0.0.1:${CLAMAV_TCP_PORT}:3310 \
+    ${CLAMAV_IMAGE}
+ExecStop=/usr/bin/podman stop --ignore --cidfile %t/sentinel-clamav.ctr-id -t 10
+ExecStopPost=/usr/bin/podman rm --ignore -f --cidfile %t/sentinel-clamav.ctr-id
+PIDFile=%t/sentinel-clamav.pid
+Type=forking
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,26 @@
+[Unit]
+Description=SENTINEL Fornitori - MinIO (evidenze/documenti)
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+EnvironmentFile=%S/state/environment
+WorkingDirectory=%S/state
+Restart=always
+ExecStartPre=/bin/rm -f %t/sentinel-minio.pid %t/sentinel-minio.ctr-id
+ExecStart=/usr/bin/podman run --conmon-pidfile %t/sentinel-minio.pid \
+    --cidfile %t/sentinel-minio.ctr-id \
+    --cgroups=no-conmon \
+    --replace --name sentinel-minio -d \
+    --env MINIO_ROOT_USER=${MINIO_ROOT_USER} \
+    --env MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD} \
+    --volume sentinel-minio-data:/data:Z \
+    --publish 127.0.0.1:${MINIO_TCP_PORT}:9000 \
+    ${MINIO_IMAGE} server /data --console-address :9001
+ExecStartPost=/usr/local/bin/runagent ensure-minio-bucket
+ExecStop=/usr/bin/podman stop --ignore --cidfile %t/sentinel-minio.ctr-id -t 10
+ExecStopPost=/usr/bin/podman rm --ignore -f --cidfile %t/sentinel-minio.ctr-id
+PIDFile=%t/sentinel-minio.pid
+Type=forking
+
+[Install]
+WantedBy=default.target

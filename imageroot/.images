@@ -1,0 +1,11 @@
+# Elenco delle immagini di terze parti richieste dal modulo.
+# Vengono scaricate automaticamente dall'azione core "create-module" e
+# trasformate in variabili d'ambiente (es. postgres:16-bookworm -> POSTGRES_IMAGE).
+# Va referenziato dal label org.nethserver.images nel file di build/label del
+# modulo (vedi documentazione "Images" del developer manual NS8): elenco qui
+# per chiarezza, il valore reale va copiato nel Containerfile/label del modulo
+# principale secondo le convenzioni ns8-kickstart.
+docker.io/library/postgres:16-bookworm
+quay.io/minio/minio:latest
+docker.io/minio/mc:latest
+docker.io/clamav/clamav:stable

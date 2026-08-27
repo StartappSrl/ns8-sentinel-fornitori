@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+#
+# Azione get-configuration: restituisce alla UI la configurazione corrente
+# (senza esporre segreti come password/chiavi).
+
+import agent
+import json
+
+env = agent.read_envfile()  # legge %S/state/environment
+
+response = {
+    "domain": env.get("APP_DOMAIN", ""),
+    "customer_name": env.get("CUSTOMER_NAME", ""),
+    "installation_id": env.get("INSTALLATION_ID", ""),
+    "admin_email": env.get("ADMIN_EMAIL", ""),
+    "app_version": env.get("APP_VERSION", ""),
+}
+
+print(json.dumps(response))
