@@ -35,7 +35,7 @@ echo "==> 1/2: build immagine applicativa (${APP_IMAGE_URL})"
 podman build -t "${APP_IMAGE_URL}" "${APP_SRC_DIR}"
 podman push "${APP_IMAGE_URL}"
 
-echo "==> 2/2: build immagine modulo (scratch, veicolo per imageroot/) con buildah"
+echo "==> 2/2: build immagine modulo (scratch, veicolo per imageroot/ + ui/) con buildah"
 
 # Immagini di terze parti dichiarate in imageroot/.images, più la nostra
 # immagine applicativa appena pubblicata: finiscono tutte nello stesso label
@@ -44,8 +44,25 @@ echo "==> 2/2: build immagine modulo (scratch, veicolo per imageroot/) con build
 THIRD_PARTY_IMAGES=$(grep -v '^#' imageroot/.images | grep -v '^[[:space:]]*$' | tr '\n' ' ')
 ALL_IMAGES="${THIRD_PARTY_IMAGES}${APP_IMAGE_URL}"
 
+# add-module esegue SEMPRE l'azione core extract-ui, che pretende un
+# percorso /ui nell'immagine modulo (fallisce con "tar: ui: Not found in
+# archive" se manca) - non è opzionale, va buildato anche senza una UI
+# personalizzata. Riusiamo un container nodebuilder per velocizzare build
+# ripetute, esattamente come fa lo script originale del kickstart.
+if ! buildah containers --format "{{.ContainerName}}" | grep -q nodebuilder-sentinel; then
+    echo "Pulling NodeJS runtime per la build della UI..."
+    buildah from --name nodebuilder-sentinel -v "${PWD}:/usr/src:Z" docker.io/library/node:24-slim
+fi
+echo "Build file statici UI con node..."
+buildah run \
+    --workingdir=/usr/src/ui \
+    --env="NODE_OPTIONS=--openssl-legacy-provider" \
+    nodebuilder-sentinel \
+    sh -c "corepack enable && yarn install && yarn build"
+
 container=$(buildah from scratch)
 buildah add "${container}" imageroot /imageroot
+buildah add "${container}" ui/dist /ui
 buildah config \
     --entrypoint=/ \
     --label="org.nethserver.authorizations=traefik@node:routeadm" \

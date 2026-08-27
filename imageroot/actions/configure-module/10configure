@@ -29,11 +29,15 @@ admin_password = request.get("admin_password")
 if not domain:
     sys.exit(1)  # dominio obbligatorio
 
-# Alloca una porta TCP per l'app (se non già allocata in precedenza) e una
-# per ciascun servizio di backend che deve restare raggiungibile solo in
-# loopback (Postgres, MinIO, ClamAV). Vedi doc "Port allocation".
-ports = agent.allocate_ports(4, "tcp")
-tcp_port, postgres_port, minio_port, clamav_port = ports
+# Le 4 porte TCP (app + Postgres/MinIO/ClamAV su loopback) sono già state
+# allocate automaticamente all'installazione dal label
+# org.nethserver.tcp-ports-demand=4 e sono esposte come variabile
+# TCP_PORTS (elenco separato da virgole) - non vanno richieste di nuovo a
+# runtime con agent.allocate_ports(), che è un'operazione privilegiata a
+# parte e richiede un'autorizzazione che questo modulo non ha (causava un
+# 403 Forbidden verso l'agente node).
+tcp_ports = [p.strip() for p in os.environ["TCP_PORTS"].split(",")]
+tcp_port, postgres_port, minio_port, clamav_port = tcp_ports
 
 env = {
     "APP_DOMAIN": domain,
