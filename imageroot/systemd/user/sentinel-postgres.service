@@ -6,11 +6,14 @@ Environment=PODMAN_SYSTEMD_UNIT=%n
 EnvironmentFile=%S/state/environment
 WorkingDirectory=%S/state
 Restart=always
+ExecStartPre=/usr/bin/podman network create --ignore sentinel-net
 ExecStartPre=/bin/rm -f %t/sentinel-postgres.pid %t/sentinel-postgres.ctr-id
 ExecStart=/usr/bin/podman run --conmon-pidfile %t/sentinel-postgres.pid \
     --cidfile %t/sentinel-postgres.ctr-id \
     --cgroups=no-conmon \
     --replace --name sentinel-postgres -d \
+    --network sentinel-net \
+    --network-alias postgres \
     --env POSTGRES_DB=${POSTGRES_DB} \
     --env POSTGRES_USER=${POSTGRES_USER} \
     --env POSTGRES_PASSWORD=${POSTGRES_PASSWORD} \

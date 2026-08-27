@@ -2,14 +2,6 @@
 #
 # Azione configure-module: valida l'input ricevuto dalla cluster-admin (o da
 # CLI) e persiste la configurazione dell'installazione SENTINEL Fornitori.
-#
-# La registrazione della route Traefik/Let's Encrypt usa lo stesso pattern
-# reale mostrato nel file di esempio del template ns8-kickstart
-# (imageroot/actions/configure-module/20configure, rimosso da questo
-# modulo): agent.tasks.run(action='set-route', ...) sull'agente traefik@node,
-# non la scorciatoia agent.set_route() citata nella documentazione testuale.
-# Il resto (bootstrap admin, prima migrazione) va comunque collaudato su un
-# cluster reale prima della produzione.
 
 import agent
 import agent.tasks
@@ -29,40 +21,59 @@ admin_password = request.get("admin_password")
 if not domain:
     sys.exit(1)  # dominio obbligatorio
 
-# Le 4 porte TCP (app + Postgres/MinIO/ClamAV su loopback) sono già state
-# allocate automaticamente all'installazione dal label
-# org.nethserver.tcp-ports-demand=4 e sono esposte come variabile
-# TCP_PORTS (elenco separato da virgole) - non vanno richieste di nuovo a
-# runtime con agent.allocate_ports(), che è un'operazione privilegiata a
-# parte e richiede un'autorizzazione che questo modulo non ha (causava un
-# 403 Forbidden verso l'agente node).
 tcp_ports = [p.strip() for p in os.environ["TCP_PORTS"].split(",")]
 tcp_port, postgres_port, minio_port, clamav_port = tcp_ports
 
+postgres_db = "sentinel"
+postgres_user = "sentinel"
+postgres_password = secrets.token_hex(32)
+minio_bucket = "sentinel-evidence"
+
+# I 4 container del modulo (postgres/minio/clamav/app) sono tutti sulla
+# stessa rete Podman dedicata "sentinel-net" (creata da ogni unit systemd
+# con "podman network create --ignore" in ExecStartPre, idempotente), con
+# un alias DNS per servizio uguale al nome usato in compose.yml originale
+# (postgres/minio/clamav) - cosi' l'app si connette con GLI STESSI hostname
+# del pacchetto Docker Compose, non con 127.0.0.1.
 env = {
+    "RUNTIME_MODE": "docker",
+    "APP_VERSION": os.environ.get("APP_VERSION", "1.0.0"),
     "APP_DOMAIN": domain,
     "CUSTOMER_NAME": customer_name or "",
     "INSTALLATION_ID": installation_id or "",
-    "ADMIN_EMAIL": admin_email or "",
-    "ADMIN_PASSWORD": admin_password or secrets.token_urlsafe(24),
+    "DEPLOYMENT_ENV": "production",
+    "ENABLED_MODULES": "NIS2",
+    "AUTH_MODE": "local",
     "SESSION_SECRET": secrets.token_hex(48),
+    "SESSION_MAX_AGE_SECONDS": "28800",
+    "COOKIE_SECURE": "true",
     "TCP_PORT": str(tcp_port),
     "POSTGRES_TCP_PORT": str(postgres_port),
     "MINIO_TCP_PORT": str(minio_port),
     "CLAMAV_TCP_PORT": str(clamav_port),
-    "POSTGRES_DB": "sentinel",
-    "POSTGRES_USER": "sentinel",
-    "POSTGRES_PASSWORD": secrets.token_hex(32),
+    "POSTGRES_DB": postgres_db,
+    "POSTGRES_USER": postgres_user,
+    "POSTGRES_PASSWORD": postgres_password,
+    "DATABASE_URL": f"postgresql://{postgres_user}:{postgres_password}@postgres:5432/{postgres_db}",
+    "DATABASE_POOL_SIZE": "10",
+    "MINIO_ENDPOINT": "minio",
+    "MINIO_PORT": "9000",
+    "MINIO_USE_SSL": "false",
     "MINIO_ROOT_USER": "sentinel-storage",
     "MINIO_ROOT_PASSWORD": secrets.token_hex(32),
-    "MINIO_BUCKET": "sentinel-evidence",
+    "MINIO_BUCKET": minio_bucket,
+    "CLAMAV_ENABLED": "true",
+    "CLAMAV_HOST": "clamav",
+    "CLAMAV_PORT": "3310",
+    "CLAMAV_TIMEOUT_MS": "120000",
+    "ADMIN_EMAIL": admin_email or "",
+    "ADMIN_PASSWORD": admin_password or secrets.token_urlsafe(24),
+    "ADMIN_NAME": "Amministratore",
 }
 
 for key, value in env.items():
     agent.set_env(key, value)
 
-# Abilita e avvia le unit systemd del modulo (Postgres/MinIO/ClamAV prima
-# dell'app, come dichiarato in sentinel-app.service con After=/Wants=).
 agent.run_helper("systemctl", "--user", "daemon-reload")
 for unit in (
     "sentinel-postgres.service",
@@ -72,39 +83,27 @@ for unit in (
 ):
     agent.run_helper("systemctl", "--user", "enable", "--now", unit)
 
-# Prima configurazione: applica le migrazioni e crea l'utente amministratore
-# iniziale (equivalenti di docker/migrate.mjs e docker/bootstrap-admin.mjs
-# nello stack Docker Compose originale). Le riesecuzioni successive sono
-# idempotenti quanto lo erano gli script originali.
-#
-# NOTA: APP_IMAGE qui è dato per scontato come variabile d'ambiente presente
-# (l'immagine principale del modulo). Verificate il nome esatto della
-# variabile impostata dall'azione core create-module per l'immagine primaria
-# del modulo (potrebbe chiamarsi diversamente, es. IMAGE_URL) e correggetelo
-# prima di usare questo scaffold.
 app_image = os.environ.get("SENTINEL_FORNITORI_APP_IMAGE", "")
 state_env_file = os.path.join(os.environ["AGENT_STATE_DIR"], "environment")
+
+# "podman run" con un tag gia' presente in locale NON lo riscarica da solo.
+agent.run_helper("podman", "pull", app_image)
 
 agent.run_helper(
     "podman", "run", "--rm",
     "--env-file", state_env_file,
-    "--network", "container:sentinel-postgres",
+    "--network", "sentinel-net",
     app_image,
     "node", "docker/migrate.mjs",
 )
 agent.run_helper(
     "podman", "run", "--rm",
     "--env-file", state_env_file,
-    "--network", "container:sentinel-postgres",
+    "--network", "sentinel-net",
     app_image,
     "node", "docker/bootstrap-admin.mjs",
 )
 
-# Registra la route HTTPS su Traefik e richiede il certificato Let's Encrypt
-# per il dominio configurato. Pattern copiato dall'esempio reale del
-# template ns8-kickstart (route by path); qui usiamo "host" invece di
-# "path" perché serviamo un dominio dedicato, non un percorso sotto il
-# dominio del nodo.
 route_response = agent.tasks.run(
     agent_id=agent.resolve_agent_id("traefik@node"),
     action="set-route",

@@ -8,11 +8,15 @@ Environment=PODMAN_SYSTEMD_UNIT=%n
 EnvironmentFile=%S/state/environment
 WorkingDirectory=%S/state
 Restart=always
+ExecStartPre=/usr/bin/podman network create --ignore sentinel-net
 ExecStartPre=/bin/rm -f %t/sentinel-app.pid %t/sentinel-app.ctr-id
 ExecStart=/usr/bin/podman run --conmon-pidfile %t/sentinel-app.pid \
     --cidfile %t/sentinel-app.ctr-id \
     --cgroups=no-conmon \
     --replace --name sentinel-app -d \
+    --pull=newer \
+    --network sentinel-net \
+    --network-alias app \
     --env-file=%S/state/environment \
     --read-only \
     --tmpfs /tmp:size=128m,mode=1777 \

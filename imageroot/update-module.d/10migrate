@@ -1,12 +1,4 @@
 #!/bin/bash
-#
-# Script eseguito dall'azione core update-module (in ordine alfabetico tra
-# tutti gli script presenti in imageroot/update-module.d/).
-#
-# Applica le migrazioni idempotenti del database prima di riavviare
-# l'applicazione, replicando quanto faceva docker/migrate.mjs nello stack
-# Docker Compose originale.
-
 set -euo pipefail
 
 source "${AGENT_STATE_DIR:-.}/environment" 2>/dev/null || true
@@ -17,10 +9,13 @@ systemctl --user restart sentinel-postgres.service
 systemctl --user restart sentinel-minio.service
 systemctl --user restart sentinel-clamav.service
 
-echo "Applico le migrazioni database (docker/migrate.mjs incluso nell'immagine app)..."
+echo "Scarico l'immagine app aggiornata..."
+podman pull "${SENTINEL_FORNITORI_APP_IMAGE}"
+
+echo "Applico le migrazioni database..."
 podman run --rm \
     --env-file="${AGENT_STATE_DIR:-.}/environment" \
-    --network=container:sentinel-postgres \
+    --network=sentinel-net \
     "${SENTINEL_FORNITORI_APP_IMAGE}" node docker/migrate.mjs
 
 echo "Riavvio l'applicazione..."
