@@ -21,7 +21,7 @@ echo "Applico le migrazioni database (docker/migrate.mjs incluso nell'immagine a
 podman run --rm \
     --env-file="${AGENT_STATE_DIR:-.}/environment" \
     --network=container:sentinel-postgres \
-    "${APP_IMAGE}" node docker/migrate.mjs
+    "${SENTINEL_FORNITORI_APP_IMAGE}" node docker/migrate.mjs
 
 echo "Riavvio l'applicazione..."
 systemctl --user restart sentinel-app.service

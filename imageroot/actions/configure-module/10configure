@@ -78,7 +78,7 @@ for unit in (
 # variabile impostata dall'azione core create-module per l'immagine primaria
 # del modulo (potrebbe chiamarsi diversamente, es. IMAGE_URL) e correggetelo
 # prima di usare questo scaffold.
-app_image = os.environ.get("APP_IMAGE", "")
+app_image = os.environ.get("SENTINEL_FORNITORI_APP_IMAGE", "")
 state_env_file = os.path.join(os.environ["AGENT_STATE_DIR"], "environment")
 
 agent.run_helper(
