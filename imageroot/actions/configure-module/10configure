@@ -3,13 +3,16 @@
 # Azione configure-module: valida l'input ricevuto dalla cluster-admin (o da
 # CLI) e persiste la configurazione dell'installazione SENTINEL Fornitori.
 #
-# La registrazione della route Traefik/Let's Encrypt (agent.set_route) segue
-# l'esempio documentato in
-# https://nethserver.github.io/ns8-core/modules/certificates/ - verificata,
-# non congetturata. Il resto (bootstrap admin, prima migrazione) va comunque
-# collaudato su un cluster reale prima della produzione.
+# La registrazione della route Traefik/Let's Encrypt usa lo stesso pattern
+# reale mostrato nel file di esempio del template ns8-kickstart
+# (imageroot/actions/configure-module/20configure, rimosso da questo
+# modulo): agent.tasks.run(action='set-route', ...) sull'agente traefik@node,
+# non la scorciatoia agent.set_route() citata nella documentazione testuale.
+# Il resto (bootstrap admin, prima migrazione) va comunque collaudato su un
+# cluster reale prima della produzione.
 
 import agent
+import agent.tasks
 import json
 import os
 import sys
@@ -94,14 +97,21 @@ agent.run_helper(
 )
 
 # Registra la route HTTPS su Traefik e richiede il certificato Let's Encrypt
-# per il dominio configurato (API confermata dal developer manual, sezione
-# "TLS certificates" - modules/certificates/).
-agent.set_route({
-    "instance": os.environ["MODULE_ID"],
-    "url": f"http://127.0.0.1:{tcp_port}",
-    "host": domain,
-    "lets_encrypt": True,
-    "http2https": True,
-})
+# per il dominio configurato. Pattern copiato dall'esempio reale del
+# template ns8-kickstart (route by path); qui usiamo "host" invece di
+# "path" perché serviamo un dominio dedicato, non un percorso sotto il
+# dominio del nodo.
+route_response = agent.tasks.run(
+    agent_id=agent.resolve_agent_id("traefik@node"),
+    action="set-route",
+    data={
+        "instance": os.environ["MODULE_ID"],
+        "url": f"http://127.0.0.1:{tcp_port}",
+        "host": domain,
+        "http2https": True,
+        "lets_encrypt": True,
+    },
+)
+agent.assert_exp(route_response["exit_code"] == 0)
 
 print(json.dumps({"status": "ok", "domain": domain, "tcp_port": tcp_port}))

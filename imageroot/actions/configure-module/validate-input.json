@@ -1,8 +1,41 @@
 {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "configure-module input",
-    "$id": "http://schema.nethserver.org/kickstart/configure-module-input.json",
-    "description": "Configure kickstart",
-    "examples": [],
-    "type": "object"
+    "$id": "http://schema.nethserver.org/sentinel-fornitori/configure-module-input.json",
+    "description": "Configura l'installazione SENTINEL Fornitori",
+    "examples": [
+        {
+            "domain": "fornitori.cliente.it",
+            "customer_name": "Azienda Cliente S.r.l.",
+            "installation_id": "cliente-prod-01",
+            "admin_email": "admin@cliente.it"
+        }
+    ],
+    "type": "object",
+    "properties": {
+        "domain": {
+            "type": "string",
+            "format": "hostname",
+            "description": "Dominio pubblico del portale, es. fornitori.cliente.it"
+        },
+        "customer_name": {
+            "type": "string",
+            "minLength": 1
+        },
+        "installation_id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9._-]+$"
+        },
+        "admin_email": {
+            "type": "string",
+            "format": "email"
+        },
+        "admin_password": {
+            "type": "string",
+            "minLength": 12,
+            "description": "Opzionale: se omessa viene generata automaticamente"
+        }
+    },
+    "required": ["domain", "customer_name", "installation_id", "admin_email"],
+    "additionalProperties": false
 }
