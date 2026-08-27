@@ -26,8 +26,12 @@ tcp_port, postgres_port, minio_port, clamav_port = tcp_ports
 
 postgres_db = "sentinel"
 postgres_user = "sentinel"
-postgres_password = secrets.token_hex(32)
 minio_bucket = "sentinel-evidence"
+
+postgres_password = os.environ.get("POSTGRES_PASSWORD") or secrets.token_hex(32)
+session_secret = os.environ.get("SESSION_SECRET") or secrets.token_hex(48)
+minio_root_password = os.environ.get("MINIO_ROOT_PASSWORD") or secrets.token_hex(32)
+generated_admin_password = os.environ.get("ADMIN_PASSWORD") or secrets.token_urlsafe(24)
 
 # I 4 container del modulo (postgres/minio/clamav/app) sono tutti sulla
 # stessa rete Podman dedicata "sentinel-net" (creata da ogni unit systemd
@@ -44,7 +48,7 @@ env = {
     "DEPLOYMENT_ENV": "production",
     "ENABLED_MODULES": "NIS2",
     "AUTH_MODE": "local",
-    "SESSION_SECRET": secrets.token_hex(48),
+    "SESSION_SECRET": session_secret,
     "SESSION_MAX_AGE_SECONDS": "28800",
     "COOKIE_SECURE": "true",
     "TCP_PORT": str(tcp_port),
@@ -60,14 +64,14 @@ env = {
     "MINIO_PORT": "9000",
     "MINIO_USE_SSL": "false",
     "MINIO_ROOT_USER": "sentinel-storage",
-    "MINIO_ROOT_PASSWORD": secrets.token_hex(32),
+    "MINIO_ROOT_PASSWORD": minio_root_password,
     "MINIO_BUCKET": minio_bucket,
     "CLAMAV_ENABLED": "true",
     "CLAMAV_HOST": "clamav",
     "CLAMAV_PORT": "3310",
     "CLAMAV_TIMEOUT_MS": "120000",
     "ADMIN_EMAIL": admin_email or "",
-    "ADMIN_PASSWORD": admin_password or secrets.token_urlsafe(24),
+    "ADMIN_PASSWORD": admin_password or generated_admin_password,
     "ADMIN_NAME": "Amministratore",
 }
 

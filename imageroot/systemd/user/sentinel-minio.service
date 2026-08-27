@@ -22,10 +22,10 @@ ExecStart=/usr/bin/podman run --conmon-pidfile %t/sentinel-minio.pid \
 ExecStartPost=/bin/bash -c 'for i in $(seq 1 30); do curl -fsS http://127.0.0.1:${MINIO_TCP_PORT}/minio/health/live && break; sleep 1; done; \
     podman run --rm --network=host \
         --env MC_HOST_local=http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@127.0.0.1:${MINIO_TCP_PORT} \
-        ${MINIO_MC_IMAGE} mb --ignore-existing --with-lock local/${MINIO_BUCKET}; \
+        ${MC_IMAGE} mb --ignore-existing --with-lock local/${MINIO_BUCKET}; \
     podman run --rm --network=host \
         --env MC_HOST_local=http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@127.0.0.1:${MINIO_TCP_PORT} \
-        ${MINIO_MC_IMAGE} version enable local/${MINIO_BUCKET}'
+        ${MC_IMAGE} version enable local/${MINIO_BUCKET}'
 ExecStop=/usr/bin/podman stop --ignore --cidfile %t/sentinel-minio.ctr-id -t 10
 ExecStopPost=/usr/bin/podman rm --ignore -f --cidfile %t/sentinel-minio.ctr-id
 PIDFile=%t/sentinel-minio.pid
