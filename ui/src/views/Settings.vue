@@ -23,14 +23,47 @@
       <cv-column>
         <cv-tile light>
           <cv-form @submit.prevent="configureModule">
-            <!-- TODO remove test field and code configuration fields -->
             <cv-text-input
-              :label="$t('settings.test_field')"
-              v-model="testField"
-              :placeholder="$t('settings.test_field')"
+              :label="$t('settings.domain')"
+              v-model="domain"
+              placeholder="fornitori.cliente.it"
               :disabled="loading.getConfiguration || loading.configureModule"
-              :invalid-message="error.testField"
-              ref="testField"
+              :invalid-message="error.domain"
+              ref="domain"
+            ></cv-text-input>
+            <cv-text-input
+              :label="$t('settings.customer_name')"
+              v-model="customerName"
+              :placeholder="$t('settings.customer_name')"
+              :disabled="loading.getConfiguration || loading.configureModule"
+              :invalid-message="error.customerName"
+              ref="customerName"
+            ></cv-text-input>
+            <cv-text-input
+              :label="$t('settings.installation_id')"
+              :helper-text="$t('settings.installation_id_helper')"
+              v-model="installationId"
+              placeholder="cliente-prod-01"
+              :disabled="loading.getConfiguration || loading.configureModule"
+              :invalid-message="error.installationId"
+              ref="installationId"
+            ></cv-text-input>
+            <cv-text-input
+              :label="$t('settings.admin_email')"
+              v-model="adminEmail"
+              placeholder="admin@cliente.it"
+              :disabled="loading.getConfiguration || loading.configureModule"
+              :invalid-message="error.adminEmail"
+              ref="adminEmail"
+            ></cv-text-input>
+            <cv-text-input
+              type="password"
+              :label="$t('settings.admin_password')"
+              :helper-text="$t('settings.admin_password_helper')"
+              v-model="adminPassword"
+              :disabled="loading.getConfiguration || loading.configureModule"
+              :invalid-message="error.adminPassword"
+              ref="adminPassword"
             ></cv-text-input>
             <cv-row v-if="error.configureModule">
               <cv-column>
@@ -55,7 +88,6 @@
     </cv-row>
   </cv-grid>
 </template>
-
 <script>
 import to from "await-to-js";
 import { mapState } from "vuex";
@@ -66,7 +98,6 @@ import {
   IconService,
   PageTitleService,
 } from "@nethserver/ns8-ui-lib";
-
 export default {
   name: "Settings",
   mixins: [
@@ -85,7 +116,11 @@ export default {
         page: "settings",
       },
       urlCheckInterval: null,
-      testField: "", // TODO remove
+      domain: "",
+      customerName: "",
+      installationId: "",
+      adminEmail: "",
+      adminPassword: "",
       loading: {
         getConfiguration: false,
         configureModule: false,
@@ -93,8 +128,11 @@ export default {
       error: {
         getConfiguration: "",
         configureModule: "",
-        testField: "", // TODO remove
-        // TODO add all validation error fields
+        domain: "",
+        customerName: "",
+        installationId: "",
+        adminEmail: "",
+        adminPassword: "",
       },
     };
   },
@@ -120,19 +158,14 @@ export default {
       this.error.getConfiguration = "";
       const taskAction = "get-configuration";
       const eventId = this.getUuid();
-
-      // register to task error
       this.core.$root.$once(
         `${taskAction}-aborted-${eventId}`,
         this.getConfigurationAborted
       );
-
-      // register to task completion
       this.core.$root.$once(
         `${taskAction}-completed-${eventId}`,
         this.getConfigurationCompleted
       );
-
       const res = await to(
         this.createModuleTaskForApp(this.instanceName, {
           action: taskAction,
@@ -144,7 +177,6 @@ export default {
         })
       );
       const err = res[0];
-
       if (err) {
         console.error(`error creating task ${taskAction}`, err);
         this.error.getConfiguration = this.getErrorMessage(err);
@@ -160,43 +192,80 @@ export default {
     getConfigurationCompleted(taskContext, taskResult) {
       this.loading.getConfiguration = false;
       const config = taskResult.output;
-
-      // TODO set configuration fields
-      // ...
-
-      // TODO remove
-      console.log("config", config);
-
-      // TODO focus first configuration field
-      this.focusElement("testField");
+      this.domain = config.domain || "";
+      this.customerName = config.customer_name || "";
+      this.installationId = config.installation_id || "";
+      this.adminEmail = config.admin_email || "";
+      // la password non viene mai restituita da get-configuration (segreto)
+      this.focusElement("domain");
     },
     validateConfigureModule() {
       this.clearErrors(this);
       let isValidationOk = true;
-
-      // TODO remove testField and validate configuration fields
-      if (!this.testField) {
-        // test field cannot be empty
-        this.error.testField = this.$t("common.required");
-
-        if (isValidationOk) {
-          this.focusElement("testField");
-          isValidationOk = false;
+      let focusAlreadySet = false;
+      const setInvalid = (field) => {
+        this.error[field] = this.$t("settings." + field + "_error");
+        if (!focusAlreadySet) {
+          this.focusElement(field);
+          focusAlreadySet = true;
         }
+        isValidationOk = false;
+      };
+      if (!this.domain || !/^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(this.domain)) {
+        this.error.domain = this.domain
+          ? this.$t("settings.invalid_domain")
+          : this.$t("common.required");
+        if (!focusAlreadySet) {
+          this.focusElement("domain");
+          focusAlreadySet = true;
+        }
+        isValidationOk = false;
+      }
+      if (!this.customerName) {
+        this.error.customerName = this.$t("common.required");
+        if (!focusAlreadySet) {
+          this.focusElement("customerName");
+          focusAlreadySet = true;
+        }
+        isValidationOk = false;
+      }
+      if (!this.installationId || !/^[a-zA-Z0-9._-]+$/.test(this.installationId)) {
+        this.error.installationId = this.installationId
+          ? this.$t("settings.invalid_installation_id")
+          : this.$t("common.required");
+        if (!focusAlreadySet) {
+          this.focusElement("installationId");
+          focusAlreadySet = true;
+        }
+        isValidationOk = false;
+      }
+      if (!this.adminEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.adminEmail)) {
+        this.error.adminEmail = this.adminEmail
+          ? this.$t("settings.invalid_email")
+          : this.$t("common.required");
+        if (!focusAlreadySet) {
+          this.focusElement("adminEmail");
+          focusAlreadySet = true;
+        }
+        isValidationOk = false;
+      }
+      if (this.adminPassword && this.adminPassword.length < 12) {
+        this.error.adminPassword = this.$t("settings.invalid_password_length");
+        if (!focusAlreadySet) {
+          this.focusElement("adminPassword");
+          focusAlreadySet = true;
+        }
+        isValidationOk = false;
       }
       return isValidationOk;
     },
     configureModuleValidationFailed(validationErrors) {
       this.loading.configureModule = false;
       let focusAlreadySet = false;
-
       for (const validationError of validationErrors) {
         const field = validationError.field;
-
         if (field !== "(root)") {
-          // set i18n error message
           this.error[field] = this.$t("settings." + validationError.error);
-
           if (!focusAlreadySet) {
             this.focusElement(field);
             focusAlreadySet = true;
@@ -209,35 +278,34 @@ export default {
       if (!isValidationOk) {
         return;
       }
-
       this.loading.configureModule = true;
       const taskAction = "configure-module";
       const eventId = this.getUuid();
-
-      // register to task error
       this.core.$root.$once(
         `${taskAction}-aborted-${eventId}`,
         this.configureModuleAborted
       );
-
-      // register to task validation
       this.core.$root.$once(
         `${taskAction}-validation-failed-${eventId}`,
         this.configureModuleValidationFailed
       );
-
-      // register to task completion
       this.core.$root.$once(
         `${taskAction}-completed-${eventId}`,
         this.configureModuleCompleted
       );
-
+      const data = {
+        domain: this.domain,
+        customer_name: this.customerName,
+        installation_id: this.installationId,
+        admin_email: this.adminEmail,
+      };
+      if (this.adminPassword) {
+        data.admin_password = this.adminPassword;
+      }
       const res = await to(
         this.createModuleTaskForApp(this.instanceName, {
           action: taskAction,
-          data: {
-            // TODO configuration fields
-          },
+          data,
           extra: {
             title: this.$t("settings.configure_instance", {
               instance: this.instanceName,
@@ -248,7 +316,6 @@ export default {
         })
       );
       const err = res[0];
-
       if (err) {
         console.error(`error creating task ${taskAction}`, err);
         this.error.configureModule = this.getErrorMessage(err);
@@ -263,14 +330,12 @@ export default {
     },
     configureModuleCompleted() {
       this.loading.configureModule = false;
-
-      // reload configuration
+      this.adminPassword = "";
       this.getConfiguration();
     },
   },
 };
 </script>
-
 <style scoped lang="scss">
 @import "../styles/carbon-utils";
 </style>
