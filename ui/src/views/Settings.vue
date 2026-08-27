@@ -203,14 +203,6 @@ export default {
       this.clearErrors(this);
       let isValidationOk = true;
       let focusAlreadySet = false;
-      const setInvalid = (field) => {
-        this.error[field] = this.$t("settings." + field + "_error");
-        if (!focusAlreadySet) {
-          this.focusElement(field);
-          focusAlreadySet = true;
-        }
-        isValidationOk = false;
-      };
       if (!this.domain || !/^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(this.domain)) {
         this.error.domain = this.domain
           ? this.$t("settings.invalid_domain")
