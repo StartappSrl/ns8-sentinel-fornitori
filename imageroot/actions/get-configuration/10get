@@ -2,18 +2,22 @@
 #
 # Azione get-configuration: restituisce alla UI la configurazione corrente
 # (senza esporre segreti come password/chiavi).
+#
+# Le variabili persistite con agent.set_env() in configure-module sono
+# disponibili direttamente in os.environ per le azioni successive - non
+# esiste una funzione "agent.read_envfile()" per rileggerle: era una
+# funzione inventata che causava "Qualcosa e' andato storto" nella UI
+# (output vuoto, azione che va in errore prima del print).
 
-import agent
 import json
-
-env = agent.read_envfile()  # legge %S/state/environment
+import os
 
 response = {
-    "domain": env.get("APP_DOMAIN", ""),
-    "customer_name": env.get("CUSTOMER_NAME", ""),
-    "installation_id": env.get("INSTALLATION_ID", ""),
-    "admin_email": env.get("ADMIN_EMAIL", ""),
-    "app_version": env.get("APP_VERSION", ""),
+    "domain": os.environ.get("APP_DOMAIN", ""),
+    "customer_name": os.environ.get("CUSTOMER_NAME", ""),
+    "installation_id": os.environ.get("INSTALLATION_ID", ""),
+    "admin_email": os.environ.get("ADMIN_EMAIL", ""),
+    "app_version": os.environ.get("APP_VERSION", ""),
 }
 
 print(json.dumps(response))
