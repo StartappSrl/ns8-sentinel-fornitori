@@ -19,7 +19,13 @@
 set -euo pipefail
 
 IMAGE_REPOBASE="${IMAGE_REPOBASE:?Imposta IMAGE_REPOBASE, es. ghcr.io/<tuo-org>}"
-IMAGE_TAG="${IMAGE_TAG:-latest}"
+if [ -z "${IMAGE_TAG:-}" ]; then
+    if [ ! -f VERSION ]; then
+        echo "Errore: file VERSION mancante e IMAGE_TAG non impostato." >&2
+        exit 1
+    fi
+    IMAGE_TAG="$(tr -d '[:space:]' < VERSION)"
+fi
 APP_SRC_DIR="${APP_SRC_DIR:-./app-src}"
 
 # Nome dell'immagine applicativa: DEVE restare distinto dal nome del modulo
@@ -30,10 +36,15 @@ MODULE_IMAGE_NAME="sentinel-fornitori"
 
 APP_IMAGE_URL="${IMAGE_REPOBASE}/${APP_IMAGE_NAME}:${IMAGE_TAG}"
 MODULE_IMAGE_URL="${IMAGE_REPOBASE}/${MODULE_IMAGE_NAME}:${IMAGE_TAG}"
+APP_IMAGE_URL_LATEST="${IMAGE_REPOBASE}/${APP_IMAGE_NAME}:latest"
+MODULE_IMAGE_URL_LATEST="${IMAGE_REPOBASE}/${MODULE_IMAGE_NAME}:latest"
+
+echo "==> Versione: ${IMAGE_TAG}"
 
 echo "==> 1/2: build immagine applicativa (${APP_IMAGE_URL})"
-podman build -t "${APP_IMAGE_URL}" "${APP_SRC_DIR}"
+podman build -t "${APP_IMAGE_URL}" -t "${APP_IMAGE_URL_LATEST}" "${APP_SRC_DIR}"
 podman push "${APP_IMAGE_URL}"
+podman push "${APP_IMAGE_URL_LATEST}"
 
 echo "==> 2/2: build immagine modulo (scratch, veicolo per imageroot/ + ui/) con buildah"
 
@@ -71,8 +82,11 @@ buildah config \
     --label="org.nethserver.images=${ALL_IMAGES}" \
     "${container}"
 buildah commit "${container}" "${MODULE_IMAGE_URL}"
+buildah tag "${MODULE_IMAGE_URL}" "${MODULE_IMAGE_URL_LATEST}"
 buildah push "${MODULE_IMAGE_URL}"
+buildah push "${MODULE_IMAGE_URL_LATEST}"
 
 echo "==> Fatto."
-echo "Immagine applicativa (usata dalle unit systemd):    ${APP_IMAGE_URL}"
-echo "Immagine modulo (da passare ad add-module):          ${MODULE_IMAGE_URL}"
+echo "Immagine applicativa: versionata ${APP_IMAGE_URL} / latest ${APP_IMAGE_URL_LATEST}"
+echo "Immagine modulo (usare SEMPRE quella versionata con add-module/update-module):"
+echo "  ${MODULE_IMAGE_URL}"
