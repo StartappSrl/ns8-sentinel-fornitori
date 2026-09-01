@@ -105,6 +105,96 @@
         />
       </cv-column>
     </cv-row>
+    <!-- application update -->
+    <cv-row>
+      <cv-column class="page-subtitle">
+        <h4>{{ $t("status.app_update") }}</h4>
+      </cv-column>
+    </cv-row>
+    <cv-row v-if="error.checkUpdate">
+      <cv-column>
+        <NsInlineNotification
+          kind="error"
+          :title="$t('action.check-update')"
+          :description="error.checkUpdate"
+          :showCloseButton="false"
+        />
+      </cv-column>
+    </cv-row>
+    <cv-row v-if="error.updateNow">
+      <cv-column>
+        <NsInlineNotification
+          kind="error"
+          :title="$t('action.update-now')"
+          :description="error.updateNow"
+          :showCloseButton="false"
+        />
+      </cv-column>
+    </cv-row>
+    <cv-row>
+      <cv-column :md="8" :max="8">
+        <cv-tile light>
+          <p>
+            <strong>{{ $t("status.installed_version") }}:</strong>
+            {{ appVersion || "-" }}
+          </p>
+          <p
+            v-if="updateInfo && updateInfo.update_available"
+            class="update-message"
+          >
+            {{
+              $t("status.update_available", {
+                version: updateInfo.latest_version,
+              })
+            }}
+          </p>
+          <p v-else-if="updateInfo && !updateInfo.update_available">
+            {{ $t("status.no_update_available") }}
+          </p>
+          <NsButton
+            kind="tertiary"
+            :loading="loading.checkUpdate"
+            @click="checkUpdate"
+          >
+            {{ $t("status.check_update") }}
+          </NsButton>
+          <NsButton
+            v-if="updateInfo && updateInfo.update_available"
+            kind="primary"
+            :loading="loading.updateNow"
+            @click="showUpdateConfirmModal"
+          >
+            {{ $t("status.update_now") }}
+          </NsButton>
+        </cv-tile>
+      </cv-column>
+    </cv-row>
+    <cv-modal
+      :visible="isUpdateConfirmModalShown"
+      kind="danger"
+      :primary-button-disabled="loading.updateNow"
+      @modal-hidden="hideUpdateConfirmModal"
+      @primary-click="updateNow"
+    >
+      <template slot="title">{{
+        $t("status.confirm_update_title")
+      }}</template>
+      <template slot="content">
+        <p>
+          {{
+            $t("status.confirm_update_description", {
+              version: updateInfo && updateInfo.latest_version,
+            })
+          }}
+        </p>
+      </template>
+      <template slot="secondary-button">{{
+        core.$t("common.cancel")
+      }}</template>
+      <template slot="primary-button">{{
+        $t("status.update_now")
+      }}</template>
+    </cv-modal>
     <!-- services -->
     <cv-row>
       <cv-column class="page-subtitle">
@@ -253,7 +343,6 @@
     </cv-row>
   </cv-grid>
 </template>
-
 <script>
 import to from "await-to-js";
 import { mapState } from "vuex";
@@ -264,7 +353,6 @@ import {
   UtilService,
   PageTitleService,
 } from "@nethserver/ns8-ui-lib";
-
 export default {
   name: "Status",
   mixins: [
@@ -293,15 +381,22 @@ export default {
       },
       backupRepositories: [],
       backups: [],
+      appVersion: "",
+      updateInfo: null,
+      isUpdateConfirmModalShown: false,
       loading: {
         getStatus: false,
         listBackupRepositories: false,
         listBackups: false,
+        checkUpdate: false,
+        updateNow: false,
       },
       error: {
         getStatus: "",
         listBackupRepositories: "",
         listBackups: "",
+        checkUpdate: "",
+        updateNow: "",
       },
     };
   },
@@ -348,6 +443,7 @@ export default {
   created() {
     this.getStatus();
     this.listBackupRepositories();
+    this.getAppVersion();
   },
   methods: {
     async getStatus() {
@@ -355,19 +451,16 @@ export default {
       this.error.getStatus = "";
       const taskAction = "get-status";
       const eventId = this.getUuid();
-
       // register to task error
       this.core.$root.$once(
         `${taskAction}-aborted-${eventId}`,
         this.getStatusAborted
       );
-
       // register to task completion
       this.core.$root.$once(
         `${taskAction}-completed-${eventId}`,
         this.getStatusCompleted
       );
-
       const res = await to(
         this.createModuleTaskForApp(this.instanceName, {
           action: taskAction,
@@ -379,7 +472,6 @@ export default {
         })
       );
       const err = res[0];
-
       if (err) {
         console.error(`error creating task ${taskAction}`, err);
         this.error.getStatus = this.getErrorMessage(err);
@@ -401,19 +493,16 @@ export default {
       this.error.listBackupRepositories = "";
       const taskAction = "list-backup-repositories";
       const eventId = this.getUuid();
-
       // register to task error
       this.core.$root.$once(
         `${taskAction}-aborted-${eventId}`,
         this.listBackupRepositoriesAborted
       );
-
       // register to task completion
       this.core.$root.$once(
         `${taskAction}-completed-${eventId}`,
         this.listBackupRepositoriesCompleted
       );
-
       const res = await to(
         this.createClusterTaskForApp({
           action: taskAction,
@@ -425,7 +514,6 @@ export default {
         })
       );
       const err = res[0];
-
       if (err) {
         console.error(`error creating task ${taskAction}`, err);
         this.error.listBackupRepositories = this.getErrorMessage(err);
@@ -451,19 +539,16 @@ export default {
       this.error.listBackups = "";
       const taskAction = "list-backups";
       const eventId = this.getUuid();
-
       // register to task error
       this.core.$root.$once(
         `${taskAction}-aborted-${eventId}`,
         this.listBackupsAborted
       );
-
       // register to task completion
       this.core.$root.$once(
         `${taskAction}-completed-${eventId}`,
         this.listBackupsCompleted
       );
-
       const res = await to(
         this.createClusterTaskForApp({
           action: taskAction,
@@ -475,7 +560,6 @@ export default {
         })
       );
       const err = res[0];
-
       if (err) {
         console.error(`error creating task ${taskAction}`, err);
         this.error.listBackups = this.getErrorMessage(err);
@@ -491,13 +575,11 @@ export default {
     listBackupsCompleted(taskContext, taskResult) {
       let backups = taskResult.output.backups;
       backups.sort(this.sortByProperty("name"));
-
       // get repository name
       for (const backup of backups) {
         const repo = this.backupRepositories.find(
           (r) => r.id == backup.repository
         );
-
         if (repo) {
           backup.repoName = repo.name;
         }
@@ -505,15 +587,134 @@ export default {
       this.backups = backups;
       this.loading.listBackups = false;
     },
+    async getAppVersion() {
+      const taskAction = "get-configuration";
+      const eventId = this.getUuid();
+      this.core.$root.$once(
+        `${taskAction}-aborted-${eventId}`,
+        () => {}
+      );
+      this.core.$root.$once(
+        `${taskAction}-completed-${eventId}`,
+        this.getAppVersionCompleted
+      );
+      const res = await to(
+        this.createModuleTaskForApp(this.instanceName, {
+          action: taskAction,
+          extra: {
+            isNotificationHidden: true,
+            eventId,
+          },
+        })
+      );
+      const err = res[0];
+      if (err) {
+        console.error(`error creating task ${taskAction}`, err);
+      }
+    },
+    getAppVersionCompleted(taskContext, taskResult) {
+      this.appVersion = taskResult.output.app_version || "";
+    },
+    async checkUpdate() {
+      this.loading.checkUpdate = true;
+      this.error.checkUpdate = "";
+      this.updateInfo = null;
+      const taskAction = "check-update";
+      const eventId = this.getUuid();
+      this.core.$root.$once(
+        `${taskAction}-aborted-${eventId}`,
+        this.checkUpdateAborted
+      );
+      this.core.$root.$once(
+        `${taskAction}-completed-${eventId}`,
+        this.checkUpdateCompleted
+      );
+      const res = await to(
+        this.createModuleTaskForApp(this.instanceName, {
+          action: taskAction,
+          extra: {
+            title: this.$t("action." + taskAction),
+            isNotificationHidden: true,
+            eventId,
+          },
+        })
+      );
+      const err = res[0];
+      if (err) {
+        console.error(`error creating task ${taskAction}`, err);
+        this.error.checkUpdate = this.getErrorMessage(err);
+        this.loading.checkUpdate = false;
+        return;
+      }
+    },
+    checkUpdateAborted(taskResult, taskContext) {
+      console.error(`${taskContext.action} aborted`, taskResult);
+      this.error.checkUpdate = this.$t("error.generic_error");
+      this.loading.checkUpdate = false;
+    },
+    checkUpdateCompleted(taskContext, taskResult) {
+      this.updateInfo = taskResult.output;
+      this.loading.checkUpdate = false;
+    },
+    showUpdateConfirmModal() {
+      this.isUpdateConfirmModalShown = true;
+    },
+    hideUpdateConfirmModal() {
+      this.isUpdateConfirmModalShown = false;
+    },
+    async updateNow() {
+      this.isUpdateConfirmModalShown = false;
+      this.loading.updateNow = true;
+      this.error.updateNow = "";
+      const taskAction = "update-now";
+      const eventId = this.getUuid();
+      this.core.$root.$once(
+        `${taskAction}-aborted-${eventId}`,
+        this.updateNowAborted
+      );
+      this.core.$root.$once(
+        `${taskAction}-completed-${eventId}`,
+        this.updateNowCompleted
+      );
+      const res = await to(
+        this.createModuleTaskForApp(this.instanceName, {
+          action: taskAction,
+          data: { target_version: this.updateInfo.latest_version },
+          extra: {
+            title: this.$t("action." + taskAction),
+            isNotificationHidden: true,
+            eventId,
+          },
+        })
+      );
+      const err = res[0];
+      if (err) {
+        console.error(`error creating task ${taskAction}`, err);
+        this.error.updateNow = this.getErrorMessage(err);
+        this.loading.updateNow = false;
+        return;
+      }
+    },
+    updateNowAborted(taskResult, taskContext) {
+      console.error(`${taskContext.action} aborted`, taskResult);
+      this.error.updateNow = this.$t("status.update_failed_rolled_back");
+      this.loading.updateNow = false;
+    },
+    updateNowCompleted(taskContext, taskResult) {
+      this.loading.updateNow = false;
+      this.updateInfo = null;
+      this.getAppVersion();
+    },
   },
 };
 </script>
-
 <style scoped lang="scss">
 @import "../styles/carbon-utils";
-
 .break-word {
   word-wrap: break-word;
   max-width: 30vw;
+}
+.update-message {
+  color: #24a148;
 }
 </style>

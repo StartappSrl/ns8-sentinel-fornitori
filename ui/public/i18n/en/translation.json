@@ -1,67 +1,78 @@
 {
-  "common": {
-    "required": "Required",
-    "work_in_progress": "Work in progress",
-    "processing": "Processing..."
-  },
-  "status": {
-    "title": "Status",
-    "app_instance": "App instance",
-    "services": "Service | Services",
-    "app_images": "App image | App images",
-    "app_volumes": "App volume | App volumes",
-    "installation_node": "Installation node",
-    "node": "Node",
-    "name": "Name",
-    "size": "Size",
-    "created": "Created",
-    "mount": "Mount",
-    "no_services": "No services",
-    "no_images": "No images",
-    "no_volumes": "No volumes"
-  },
-  "settings": {
-    "title": "Settings",
-    "configure_instance": "Configure {instance}",
-    "save": "Save",
-    "domain": "Domain",
-    "customer_name": "Customer name",
-    "installation_id": "Installation ID",
-    "installation_id_helper": "Only letters, numbers, dot, hyphen and underscore",
-    "admin_email": "Administrator email",
-    "admin_password": "Administrator password",
-    "admin_password_helper": "Leave empty to keep the current password (a random one is generated automatically on first setup)",
-    "invalid_domain": "Enter a valid domain",
-    "invalid_installation_id": "Only letters, numbers, dot, hyphen and underscore are allowed",
-    "invalid_email": "Enter a valid email address",
-    "invalid_password_length": "Password must be at least 12 characters long"
-  },
   "about": {
     "title": "About"
   },
-  "task": {
-    "cannot_create_task": "Cannot create task {action}"
-  },
   "action": {
-    "get-status": "Get status",
-    "get-configuration": "Get configuration",
+    "check-update": "Check for update",
     "configure-module": "Configure module",
+    "get-configuration": "Get configuration",
     "get-module-info": "Get module info",
     "get-name": "Get name",
+    "get-status": "Get status",
     "list-backup-repositories": "List backup repositories",
     "list-backups": "List backups",
-    "list-installed-modules": "List installed modules"
+    "list-installed-modules": "List installed modules",
+    "update-now": "Update now"
+  },
+  "common": {
+    "processing": "Processing...",
+    "required": "Required",
+    "work_in_progress": "Work in progress"
   },
   "error": {
-    "error": "Error",
-    "generic_error": "Something went wrong",
-    "validation_error": "Validation error",
-    "network_error": "Network error",
-    "network_timeout": "Network timeout",
     "401": "Invalid authentication",
     "403": "Operation not authorized",
     "404": "Resource not found",
+    "cannot_retrieve_installed_modules": "Cannot retrieve installed modules",
     "cannot_retrieve_module_info": "Cannot retrieve module info",
-    "cannot_retrieve_installed_modules": "Cannot retrieve installed modules"
+    "error": "Error",
+    "generic_error": "Something went wrong",
+    "network_error": "Network error",
+    "network_timeout": "Network timeout",
+    "validation_error": "Validation error"
+  },
+  "settings": {
+    "admin_email": "Administrator email",
+    "admin_password": "Administrator password",
+    "admin_password_helper": "Leave empty to keep the current password (a random one is generated automatically on first setup)",
+    "configure_instance": "Configure {instance}",
+    "customer_name": "Customer name",
+    "domain": "Domain",
+    "installation_id": "Installation ID",
+    "installation_id_helper": "Only letters, numbers, dot, hyphen and underscore",
+    "invalid_domain": "Enter a valid domain",
+    "invalid_email": "Enter a valid email address",
+    "invalid_installation_id": "Only letters, numbers, dot, hyphen and underscore are allowed",
+    "invalid_password_length": "Password must be at least 12 characters long",
+    "save": "Save",
+    "title": "Settings"
+  },
+  "status": {
+    "app_images": "App image | App images",
+    "app_instance": "App instance",
+    "app_update": "Application update",
+    "app_volumes": "App volume | App volumes",
+    "check_update": "Check for update",
+    "confirm_update_description": "The application will be updated to version {version}. The service may be briefly unreachable during the restart; if something goes wrong, the previous version will be restored automatically.",
+    "confirm_update_title": "Confirm update?",
+    "created": "Created",
+    "installation_node": "Installation node",
+    "installed_version": "Installed version",
+    "mount": "Mount",
+    "name": "Name",
+    "no_images": "No images",
+    "no_services": "No services",
+    "no_update_available": "You already have the latest version installed.",
+    "no_volumes": "No volumes",
+    "node": "Node",
+    "services": "Service | Services",
+    "size": "Size",
+    "title": "Status",
+    "update_available": "Version {version} is available",
+    "update_failed_rolled_back": "The update failed: the previous version was restored automatically.",
+    "update_now": "Update now"
+  },
+  "task": {
+    "cannot_create_task": "Cannot create task {action}"
   }
 }

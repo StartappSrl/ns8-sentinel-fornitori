@@ -1,67 +1,78 @@
 {
+  "about": {
+    "title": "Informazioni"
+  },
+  "action": {
+    "check-update": "Verifica aggiornamento",
+    "configure-module": "Configura modulo",
+    "get-configuration": "Visualizza configurazione",
+    "get-module-info": "Visualizza info modulo",
+    "get-name": "Visualizza nome",
+    "get-status": "Visualizza stato",
+    "list-backup-repositories": "Elenca repository di backup",
+    "list-backups": "Elenca backup",
+    "list-installed-modules": "Elenca moduli installati",
+    "update-now": "Aggiorna ora"
+  },
   "common": {
-    "required": "Obbligatorio",
     "processing": "In elaborazione…",
+    "required": "Obbligatorio",
     "work_in_progress": "In lavorazione"
   },
-  "status": {
-    "node": "Nodo",
-    "services": "Servizio | Servizi",
-    "no_volumes": "Nessun volume",
-    "title": "Stato",
-    "name": "Nome",
-    "size": "Dimensione",
-    "created": "Creato",
-    "no_services": "Nessun servizio",
-    "no_images": "Nessuna immagine",
-    "app_images": "Immagine app|Immagini app",
-    "app_instance": "Istanza app",
-    "app_volumes": "Volume app|Volumi app",
-    "installation_node": "Nodo di installazione",
-    "mount": "Percorso di mount"
+  "error": {
+    "401": "Autenticazione non valida",
+    "403": "Operazione non autorizzata",
+    "404": "Risorsa non trovata",
+    "cannot_retrieve_installed_modules": "Impossibile elencare moduli installati",
+    "cannot_retrieve_module_info": "Impossibile recuperare info modulo",
+    "error": "Errore",
+    "generic_error": "Qualcosa è andato storto",
+    "network_error": "Errore di rete",
+    "network_timeout": "Timeout di rete",
+    "validation_error": "Errore di validazione"
   },
   "settings": {
-    "title": "Impostazioni",
-    "configure_instance": "Configura {instance}",
-    "save": "Salva",
-    "domain": "Dominio",
-    "customer_name": "Nome cliente",
-    "installation_id": "ID installazione",
-    "installation_id_helper": "Solo lettere, numeri, punto, trattino e underscore",
     "admin_email": "Email amministratore",
     "admin_password": "Password amministratore",
     "admin_password_helper": "Lascia vuoto per mantenere la password attuale (al primo avvio ne viene generata una casuale)",
+    "configure_instance": "Configura {instance}",
+    "customer_name": "Nome cliente",
+    "domain": "Dominio",
+    "installation_id": "ID installazione",
+    "installation_id_helper": "Solo lettere, numeri, punto, trattino e underscore",
     "invalid_domain": "Inserisci un dominio valido",
-    "invalid_installation_id": "Sono ammessi solo lettere, numeri, punto, trattino e underscore",
     "invalid_email": "Inserisci un indirizzo email valido",
-    "invalid_password_length": "La password deve contenere almeno 12 caratteri"
+    "invalid_installation_id": "Sono ammessi solo lettere, numeri, punto, trattino e underscore",
+    "invalid_password_length": "La password deve contenere almeno 12 caratteri",
+    "save": "Salva",
+    "title": "Impostazioni"
   },
-  "error": {
-    "error": "Errore",
-    "404": "Risorsa non trovata",
-    "validation_error": "Errore di validazione",
-    "network_error": "Errore di rete",
-    "cannot_retrieve_installed_modules": "Impossibile elencare moduli installati",
-    "cannot_retrieve_module_info": "Impossibile recuperare info modulo",
-    "network_timeout": "Timeout di rete",
-    "generic_error": "Qualcosa è andato storto",
-    "401": "Autenticazione non valida",
-    "403": "Operazione non autorizzata"
-  },
-  "action": {
-    "configure-module": "Configura modulo",
-    "get-configuration": "Visualizza configurazione",
-    "get-status": "Visualizza stato",
-    "get-module-info": "Visualizza info modulo",
-    "get-name": "Visualizza nome",
-    "list-backup-repositories": "Elenca repository di backup",
-    "list-backups": "Elenca backup",
-    "list-installed-modules": "Elenca moduli installati"
+  "status": {
+    "app_images": "Immagine app|Immagini app",
+    "app_instance": "Istanza app",
+    "app_update": "Aggiornamento applicativo",
+    "app_volumes": "Volume app|Volumi app",
+    "check_update": "Verifica aggiornamento",
+    "confirm_update_description": "L'applicazione verrà aggiornata alla versione {version}. Il servizio potrebbe essere brevemente non raggiungibile durante il riavvio; in caso di problemi verrà ripristinata automaticamente la versione precedente.",
+    "confirm_update_title": "Confermi l'aggiornamento?",
+    "created": "Creato",
+    "installation_node": "Nodo di installazione",
+    "installed_version": "Versione installata",
+    "mount": "Percorso di mount",
+    "name": "Nome",
+    "no_images": "Nessuna immagine",
+    "no_services": "Nessun servizio",
+    "no_update_available": "Hai già installato l'ultima versione disponibile.",
+    "no_volumes": "Nessun volume",
+    "node": "Nodo",
+    "services": "Servizio | Servizi",
+    "size": "Dimensione",
+    "title": "Stato",
+    "update_available": "È disponibile la versione {version}",
+    "update_failed_rolled_back": "L'aggiornamento non è andato a buon fine: è stata ripristinata automaticamente la versione precedente.",
+    "update_now": "Aggiorna ora"
   },
   "task": {
     "cannot_create_task": "Impossibile eseguire il task {action}"
-  },
-  "about": {
-    "title": "Informazioni"
   }
 }
