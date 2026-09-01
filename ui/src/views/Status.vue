@@ -700,7 +700,7 @@ export default {
       this.error.updateNow = this.$t("status.update_failed_rolled_back");
       this.loading.updateNow = false;
     },
-    updateNowCompleted(taskContext, taskResult) {
+    updateNowCompleted() {
       this.loading.updateNow = false;
       this.updateInfo = null;
       this.getAppVersion();
