@@ -46,6 +46,15 @@ current_version = os.environ.get("APP_VERSION", "")
 tcp_port = os.environ["TCP_PORT"]
 state_env_file = os.path.join(os.environ["AGENT_STATE_DIR"], "environment")
 
+# File di credenziali dedicato a questa istanza (scritto da
+# set-registry-credentials), NON il file condiviso di nodo
+# /etc/nethserver/registry.json - vedi commento in quell'azione per il
+# perché. Usato solo se esiste: se l'immagine e' pubblica o le
+# credenziali non sono mai state configurate, "podman pull" si comporta
+# come prima (nessuna regressione).
+ghcr_authfile = os.path.expanduser("~/.config/state/ghcr-pull-auth.json")
+pull_extra_args = ["--authfile", ghcr_authfile] if os.path.isfile(ghcr_authfile) else []
+
 if not current_image or ":" not in current_image:
     print(json.dumps({"error": "SENTINEL_FORNITORI_APP_IMAGE non impostata o senza tag"}))
     sys.exit(1)
@@ -80,7 +89,7 @@ agent.set_env("PREVIOUS_APP_IMAGE", current_image)
 agent.set_env("PREVIOUS_APP_VERSION", current_version)
 
 # 2. Scarica la nuova immagine.
-agent.run_helper("podman", "pull", target_image)
+agent.run_helper("podman", "pull", *pull_extra_args, target_image)
 
 # 3. Applica le migrazioni con la nuova immagine (stesso comando gia' usato
 #    in configure-module/10configure), PRIMA di toccare il servizio in

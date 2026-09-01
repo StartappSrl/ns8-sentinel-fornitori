@@ -217,7 +217,15 @@ state_env_file = os.path.join(os.environ["AGENT_STATE_DIR"], "environment")
 # forzato esplicitamente, altrimenti (visto durante lo sviluppo) il
 # container continua a partire dalla vecchia immagine cache anche dopo
 # push/reinstallazioni ripetute.
-agent.run_helper("podman", "pull", app_image)
+#
+# --authfile punta al file di credenziali dedicato a questa istanza
+# (scritto da set-registry-credentials), non al file condiviso di nodo
+# /etc/nethserver/registry.json - vedi commento in quell'azione. Usato
+# solo se esiste, per non cambiare comportamento quando l'immagine e'
+# pubblica o le credenziali non sono ancora state configurate.
+ghcr_authfile = os.path.expanduser("~/.config/state/ghcr-pull-auth.json")
+pull_extra_args = ["--authfile", ghcr_authfile] if os.path.isfile(ghcr_authfile) else []
+agent.run_helper("podman", "pull", *pull_extra_args, app_image)
 
 # --network sentinel-net (non "container:sentinel-postgres"): questi job
 # usano DATABASE_URL con hostname "postgres", risolto dall'alias DNS sulla
