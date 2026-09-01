@@ -1,0 +1,23 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "check-update output",
+    "$id": "http://schema.nethserver.org/sentinel-fornitori/check-update-output.json",
+    "description": "Confronto tra la versione installata dell'immagine applicativa e l'ultima pubblicata sul registro",
+    "examples": [
+        {
+            "current_version": "1.0.0",
+            "latest_version": "1.1.0",
+            "update_available": true,
+            "image_repo": "ghcr.io/startappate/sentinel-fornitori-nis2"
+        }
+    ],
+    "type": "object",
+    "properties": {
+        "current_version": { "type": "string" },
+        "latest_version": { "type": "string" },
+        "update_available": { "type": "boolean" },
+        "image_repo": { "type": "string" }
+    },
+    "required": ["current_version", "latest_version", "update_available", "image_repo"],
+    "additionalProperties": false
+}

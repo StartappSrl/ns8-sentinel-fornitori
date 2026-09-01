@@ -1,0 +1,25 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "update-now input",
+    "$id": "http://schema.nethserver.org/sentinel-fornitori/update-now-input.json",
+    "description": "Aggiorna l'immagine applicativa alla versione indicata, con rollback automatico se l'health check fallisce",
+    "examples": [
+        { "target_version": "1.1.0" },
+        { "target_version": "1.0.0", "image_repo": "ghcr.io/startappate/sentinel-fornitori-nis2" }
+    ],
+    "type": "object",
+    "properties": {
+        "target_version": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+            "description": "Tag semver dell'immagine applicativa da installare (es. 1.1.0), tipicamente il latest_version restituito da check-update"
+        },
+        "image_repo": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Opzionale: usato solo per cambiare una tantum il repository dell'immagine (es. passaggio da un repository di test a quello reale). Omesso, resta lo stesso repository gia' configurato."
+        }
+    },
+    "required": ["target_version"],
+    "additionalProperties": false
+}

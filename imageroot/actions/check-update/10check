@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+#
+# Azione check-update: interroga il registro (ghcr.io, o compatibile Docker
+# Registry HTTP API v2) per i tag pubblicati dell'immagine applicativa e
+# confronta la versione piu' recente con quella attualmente installata
+# (APP_VERSION, impostata da configure-module/10configure). Azione di sola
+# lettura: non modifica nulla.
+#
+# NOTA: pensata per ghcr.io (GitHub Container Registry). Il pacchetto
+# dell'immagine applicativa e' privato: se sono state impostate le
+# variabili GHCR_PULL_USER/GHCR_PULL_TOKEN (via l'azione
+# set-registry-credentials, invocata una tantum da terminale) il token di
+# lettura viene richiesto con autenticazione Basic (stesso schema di
+# "docker login"/"podman login" verso ghcr.io: utente GitHub + PAT con
+# scope read:packages); se non sono impostate si tenta comunque il token
+# anonimo, che funziona solo per pacchetti pubblici.
+#
+# Confronta solo tag in formato semver stretto X.Y.Z (lo stesso formato
+# scritto nel file VERSION da build-images.sh) - tag come "latest",
+# "1.2.3-rc1" o hash vengono ignorati, cosi' come nel file VERSION non si
+# usano mai pre-release per le versioni pubblicate in produzione.
+
+import base64
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
+
+current_image = os.environ.get("SENTINEL_FORNITORI_APP_IMAGE", "")
+current_version = os.environ.get("APP_VERSION", "")
+ghcr_user = os.environ.get("GHCR_PULL_USER")
+ghcr_token = os.environ.get("GHCR_PULL_TOKEN")
+
+if not current_image or ":" not in current_image:
+    print(json.dumps({"error": "SENTINEL_FORNITORI_APP_IMAGE non impostata o senza tag"}))
+    sys.exit(1)
+
+repo, _, _current_tag = current_image.rpartition(":")
+registry_host, _, repo_path = repo.partition("/")
+
+if registry_host != "ghcr.io":
+    print(json.dumps({
+        "error": f"Registro '{registry_host}' non supportato da questa azione (solo ghcr.io)",
+        "current_version": current_version,
+    }))
+    sys.exit(1)
+
+
+def fetch_json(url, bearer=None, basic=None):
+    req = urllib.request.Request(url)
+    if bearer:
+        req.add_header("Authorization", f"Bearer {bearer}")
+    elif basic:
+        req.add_header("Authorization", f"Basic {basic}")
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.load(resp)
+
+
+basic_auth = None
+if ghcr_user and ghcr_token:
+    basic_auth = base64.b64encode(f"{ghcr_user}:{ghcr_token}".encode()).decode()
+
+try:
+    token_resp = fetch_json(
+        f"https://ghcr.io/token?service=ghcr.io&scope=repository:{repo_path}:pull",
+        basic=basic_auth,
+    )
+    token = token_resp["token"]
+    tags_resp = fetch_json(f"https://ghcr.io/v2/{repo_path}/tags/list", bearer=token)
+    tags = tags_resp.get("tags", [])
+except (urllib.error.URLError, urllib.error.HTTPError, KeyError, TimeoutError) as exc:
+    hint = ""
+    if not basic_auth:
+        hint = (
+            " (pacchetto privato senza credenziali configurate? vedi "
+            "l'azione set-registry-credentials)"
+        )
+    print(json.dumps({
+        "error": f"Impossibile interrogare ghcr.io: {exc}{hint}",
+        "current_version": current_version,
+    }))
+    sys.exit(1)
+
+semver_re = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+
+
+def parse_semver(tag):
+    m = semver_re.match(tag)
+    return tuple(int(part) for part in m.groups()) if m else None
+
+
+candidates = [(parse_semver(t), t) for t in tags]
+candidates = [(v, t) for v, t in candidates if v is not None]
+
+if not candidates:
+    print(json.dumps({
+        "error": "Nessun tag in formato semver (X.Y.Z) trovato sul registro",
+        "current_version": current_version,
+    }))
+    sys.exit(1)
+
+candidates.sort()
+latest_version_tuple, latest_version = candidates[-1]
+current_version_tuple = parse_semver(current_version)
+
+update_available = (
+    current_version_tuple is None or latest_version_tuple > current_version_tuple
+)
+
+print(json.dumps({
+    "current_version": current_version,
+    "latest_version": latest_version,
+    "update_available": update_available,
+    "image_repo": repo,
+}))

@@ -1,0 +1,16 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "set-registry-credentials input",
+    "$id": "http://schema.nethserver.org/sentinel-fornitori/set-registry-credentials-input.json",
+    "description": "Credenziali per il pull dell'immagine applicativa da un registro privato (ghcr.io). Da invocare solo da terminale, mai dalla UI cluster-admin.",
+    "examples": [
+        { "username": "startapp-bot", "token": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" }
+    ],
+    "type": "object",
+    "properties": {
+        "username": { "type": "string", "minLength": 1 },
+        "token": { "type": "string", "minLength": 1 }
+    },
+    "required": ["username", "token"],
+    "additionalProperties": false
+}

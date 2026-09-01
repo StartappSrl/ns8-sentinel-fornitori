@@ -1,65 +1,71 @@
 #!/bin/bash
 #
-# Costruisce e pubblica DUE immagini distinte, seguendo il meccanismo reale
-# usato dal template ns8-kickstart (build-images.sh originale, basato su
-# buildah, non su un Containerfile "normale" - vedi
-# https://github.com/NethServer/ns8-kickstart/blob/main/build-images.sh):
+# Costruisce e pubblica l'immagine "MODULO": un'immagine scratch (vuota,
+# mai eseguita) che contiene solo imageroot/ + ui/dist e i label
+# org.nethserver.*, seguendo il meccanismo reale usato dal template
+# ns8-kickstart (build-images.sh originale, basato su buildah, non su un
+# Containerfile "normale" - vedi
+# https://github.com/NethServer/ns8-kickstart/blob/main/build-images.sh).
+# È QUESTA l'immagine che si passa ad `add-module`/`update-module`.
 #
-# 1. l'immagine APPLICATIVA (Next.js/vinext) - quella che gira davvero,
-#    buildata dal Dockerfile del repo sorgente dell'app (APP_SRC_DIR);
-# 2. l'immagine "MODULO" - un'immagine scratch (vuota, mai eseguita) che
-#    contiene solo imageroot/ e i label org.nethserver.*. È QUESTA seconda
-#    immagine che si passa ad `add-module`, non la prima.
+# L'immagine APPLICATIVA (Next.js) NON viene più costruita/pubblicata da
+# questo script (vedi guida §3.17/3.18): è pubblicata da una pipeline
+# esterna a questo progetto (repository GitHub
+# startappate/sentinel-fornitori-nis2, privato), con una cadenza di
+# rilascio indipendente da quella del modulo NS8. Il modulo la risolve da
+# solo: alla primissima configurazione di un'istanza,
+# configure-module/10configure interroga ghcr.io per l'ultimo tag semver
+# pubblicato; gli aggiornamenti successivi passano dai pulsanti "Verifica
+# aggiornamento"/"Aggiorna ora" (azioni check-update/update-now), non più
+# da qui. Per questo l'immagine app NON è (più) elencata nel label
+# org.nethserver.images: se lo fosse, NS8 deriverebbe il nome della
+# variabile d'ambiente dall'ultimo segmento del suo path reale, un nome
+# che non controlliamo (vedi commento in configure-module/10configure).
+#
+# VERSIONING di QUESTA immagine (modulo, non app - vedi anche guida
+# §3.15): il tag di pubblicazione di default è il contenuto del file
+# VERSION alla radice del repo, non "latest". "podman run
+# <immagine>:latest" non riscarica un'immagine gia' presente in cache
+# locale con lo stesso tag, anche se sul registro il contenuto e'
+# cambiato (causa reale, vista piu' volte in collaudo, di container/moduli
+# bloccati su una build vecchia nonostante push ripetuti) - un tag
+# versionato e immutabile elimina l'ambiguita' alla radice: ogni release
+# ha un nome diverso, niente più bisogno di indovinare se la cache locale
+# di un nodo o di un utente di sistema e' aggiornata o no.
+#
+# Per rilasciare una nuova versione DEL MODULO: aggiornate il file
+# VERSION, fate commit, poi lanciate questo script senza altro. "latest"
+# viene comunque pubblicato in aggiunta, come comodo alias per i test
+# rapidi, MA add-module/update-module in produzione vanno sempre puntati
+# al tag versionato esplicito, mai a "latest" (che può cambiare sotto i
+# piedi di un cliente senza che ve ne accorgiate).
 #
 # Uso:
 #   export IMAGE_REPOBASE=ghcr.io/<tuo-org>
-#   export APP_SRC_DIR=/percorso/al/repo/app-sentinel
 #   ./build-images.sh
+#   # oppure, per forzare un tag diverso dal contenuto di VERSION:
+#   IMAGE_TAG=1.2.3-rc1 ./build-images.sh
 
 set -euo pipefail
 
 IMAGE_REPOBASE="${IMAGE_REPOBASE:?Imposta IMAGE_REPOBASE, es. ghcr.io/<tuo-org>}"
 if [ -z "${IMAGE_TAG:-}" ]; then
     if [ ! -f VERSION ]; then
-        echo "Errore: file VERSION mancante e IMAGE_TAG non impostato." >&2
+        echo "Errore: file VERSION mancante e IMAGE_TAG non impostato. Crea VERSION (es. 'echo 1.0.0 > VERSION') o esporta IMAGE_TAG esplicitamente." >&2
         exit 1
     fi
     IMAGE_TAG="$(tr -d '[:space:]' < VERSION)"
 fi
-APP_SRC_DIR="${APP_SRC_DIR:-./app-src}"
 
-# Nome dell'immagine applicativa: DEVE restare distinto dal nome del modulo
-# ("sentinel-fornitori", riservato all'immagine scratch sotto) altrimenti i
-# due tag si sovrascrivono a vicenda nello stesso registro.
-APP_IMAGE_NAME="sentinel-fornitori-app"
 MODULE_IMAGE_NAME="sentinel-fornitori"
-
-APP_IMAGE_URL="${IMAGE_REPOBASE}/${APP_IMAGE_NAME}:${IMAGE_TAG}"
 MODULE_IMAGE_URL="${IMAGE_REPOBASE}/${MODULE_IMAGE_NAME}:${IMAGE_TAG}"
-APP_IMAGE_URL_LATEST="${IMAGE_REPOBASE}/${APP_IMAGE_NAME}:latest"
 MODULE_IMAGE_URL_LATEST="${IMAGE_REPOBASE}/${MODULE_IMAGE_NAME}:latest"
 
-echo "==> Versione: ${IMAGE_TAG}"
+echo "==> Versione modulo: ${IMAGE_TAG}"
+echo "==> build immagine modulo (scratch, veicolo per imageroot/ + ui/) con buildah"
 
-echo "==> 1/2: build immagine applicativa (${APP_IMAGE_URL})"
-podman build -t "${APP_IMAGE_URL}" -t "${APP_IMAGE_URL_LATEST}" "${APP_SRC_DIR}"
-podman push "${APP_IMAGE_URL}"
-podman push "${APP_IMAGE_URL_LATEST}"
+ALL_IMAGES=$(grep -v '^#' imageroot/.images | grep -v '^[[:space:]]*$' | tr '\n' ' ')
 
-echo "==> 2/2: build immagine modulo (scratch, veicolo per imageroot/ + ui/) con buildah"
-
-# Immagini di terze parti dichiarate in imageroot/.images, più la nostra
-# immagine applicativa appena pubblicata: finiscono tutte nello stesso label
-# org.nethserver.images e vengono scaricate automaticamente dall'azione core
-# create-module al momento dell'installazione.
-THIRD_PARTY_IMAGES=$(grep -v '^#' imageroot/.images | grep -v '^[[:space:]]*$' | tr '\n' ' ')
-ALL_IMAGES="${THIRD_PARTY_IMAGES}${APP_IMAGE_URL}"
-
-# add-module esegue SEMPRE l'azione core extract-ui, che pretende un
-# percorso /ui nell'immagine modulo (fallisce con "tar: ui: Not found in
-# archive" se manca) - non è opzionale, va buildato anche senza una UI
-# personalizzata. Riusiamo un container nodebuilder per velocizzare build
-# ripetute, esattamente come fa lo script originale del kickstart.
 if ! buildah containers --format "{{.ContainerName}}" | grep -q nodebuilder-sentinel; then
     echo "Pulling NodeJS runtime per la build della UI..."
     buildah from --name nodebuilder-sentinel -v "${PWD}:/usr/src:Z" docker.io/library/node:24-slim
@@ -87,6 +93,10 @@ buildah push "${MODULE_IMAGE_URL}"
 buildah push "${MODULE_IMAGE_URL_LATEST}"
 
 echo "==> Fatto."
-echo "Immagine applicativa: versionata ${APP_IMAGE_URL} / latest ${APP_IMAGE_URL_LATEST}"
-echo "Immagine modulo (usare SEMPRE quella versionata con add-module/update-module):"
-echo "  ${MODULE_IMAGE_URL}"
+echo "Immagine modulo (da passare ad add-module/update-module):"
+echo "  versionata (usare SEMPRE questa in produzione): ${MODULE_IMAGE_URL}"
+echo "  alias latest (solo comodo per test manuali):    ${MODULE_IMAGE_URL_LATEST}"
+echo
+echo "Nota: l'immagine applicativa non viene toccata da questo script."
+echo "La risolve da sola configure-module (prima installazione) o"
+echo "update-now (aggiornamenti), interrogando ghcr.io/startappate/sentinel-fornitori-nis2."

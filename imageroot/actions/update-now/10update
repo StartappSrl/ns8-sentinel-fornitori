@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+#
+# Azione update-now: aggiorna SOLO l'immagine applicativa (non l'intero
+# modulo) alla versione indicata, riprendendo la stessa logica gia'
+# collaudata in docker/update.sh + docker/rollback.sh del pacchetto Docker
+# originale:
+#   1. scarica la nuova immagine;
+#   2. applica le migrazioni database con la nuova immagine (il container
+#      con la vecchia immagine app resta in esecuzione, invariato, per
+#      tutta questa fase: se le migrazioni falliscono qui, agent.run_helper
+#      solleva un'eccezione, l'azione si interrompe e l'app in produzione
+#      non viene mai toccata - nessun rollback necessario);
+#   3. punta il servizio alla nuova immagine e riavvia sentinel-app.service;
+#   4. controlla /api/health per un massimo di 30 tentativi (5s ciascuno,
+#      stesso timeout usato in docker/update.sh);
+#   5. se non torna sano, ripristina automaticamente l'immagine precedente e
+#      riavvia di nuovo (senza rieseguire le migrazioni al rollback, per lo
+#      stesso motivo per cui non lo fa nemmeno rollback.sh: le migrazioni
+#      sono additive/retrocompatibili, non si "annullano").
+#
+# Aggiorna solo SENTINEL_FORNITORI_APP_IMAGE/APP_VERSION, non l'immagine
+# "modulo" (quella con imageroot/+ui, che si aggiorna con `update-module`,
+# vedi imageroot/update-module.d/10migrate): i due meccanismi sono
+# indipendenti, esattamente come nel pacchetto originale l'app si poteva
+# aggiornare senza toccare Postgres/MinIO/ClamAV.
+
+import json
+import os
+import subprocess
+import sys
+import time
+
+import agent
+
+request = json.load(sys.stdin)
+target_version = request["target_version"]
+# image_repo e' opzionale e serve SOLO per il passaggio una tantum da un
+# repository immagine a un altro (es. dal repository di test usato in
+# collaudo a quello reale dove pubblica la pipeline esterna, vedi guida
+# §3.17/3.18): negli aggiornamenti di routine si omette e resta lo stesso
+# repository gia' configurato.
+image_repo_override = request.get("image_repo")
+
+current_image = os.environ.get("SENTINEL_FORNITORI_APP_IMAGE", "")
+current_version = os.environ.get("APP_VERSION", "")
+tcp_port = os.environ["TCP_PORT"]
+state_env_file = os.path.join(os.environ["AGENT_STATE_DIR"], "environment")
+
+if not current_image or ":" not in current_image:
+    print(json.dumps({"error": "SENTINEL_FORNITORI_APP_IMAGE non impostata o senza tag"}))
+    sys.exit(1)
+
+if target_version == current_version and not image_repo_override:
+    print(json.dumps({"error": f"La versione {target_version} e' gia' quella installata"}))
+    sys.exit(1)
+
+current_repo, _, _current_tag = current_image.rpartition(":")
+repo = image_repo_override or current_repo
+target_image = f"{repo}:{target_version}"
+
+
+def wait_healthy(attempts=30, interval_seconds=5):
+    for _ in range(attempts):
+        try:
+            result = subprocess.run(
+                ["curl", "-fsS", f"http://127.0.0.1:{tcp_port}/api/health"],
+                capture_output=True, timeout=10,
+            )
+            if result.returncode == 0:
+                return True
+        except subprocess.TimeoutExpired:
+            pass
+        time.sleep(interval_seconds)
+    return False
+
+
+# 1. Salva il riferimento all'immagine corrente, per un eventuale rollback
+#    (equivalente di .rollback.env in docker/update.sh).
+agent.set_env("PREVIOUS_APP_IMAGE", current_image)
+agent.set_env("PREVIOUS_APP_VERSION", current_version)
+
+# 2. Scarica la nuova immagine.
+agent.run_helper("podman", "pull", target_image)
+
+# 3. Applica le migrazioni con la nuova immagine (stesso comando gia' usato
+#    in configure-module/10configure), PRIMA di toccare il servizio in
+#    esecuzione.
+agent.run_helper(
+    "podman", "run", "--rm",
+    "--env-file", state_env_file,
+    "--network", "sentinel-net",
+    target_image,
+    "node", "docker/migrate.mjs",
+)
+
+# 4. Punta il servizio alla nuova immagine e riavvia.
+agent.set_env("SENTINEL_FORNITORI_APP_IMAGE", target_image)
+agent.set_env("APP_VERSION", target_version)
+agent.run_helper("systemctl", "--user", "restart", "sentinel-app.service")
+
+# 5. Health check con timeout, rollback automatico se fallisce.
+if wait_healthy():
+    print(json.dumps({"status": "ok", "installed_version": target_version}))
+    sys.exit(0)
+
+agent.set_env("SENTINEL_FORNITORI_APP_IMAGE", current_image)
+agent.set_env("APP_VERSION", current_version)
+agent.run_helper("systemctl", "--user", "restart", "sentinel-app.service")
+
+print(json.dumps({
+    "error": (
+        f"Aggiornamento a {target_version} non ha superato l'health check: "
+        f"ripristinata la versione precedente {current_version}"
+    ),
+    "attempted_version": target_version,
+    "restored_version": current_version,
+}))
+sys.exit(1)

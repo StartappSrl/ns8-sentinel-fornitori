@@ -2,13 +2,87 @@
 #
 # Azione configure-module: valida l'input ricevuto dalla cluster-admin (o da
 # CLI) e persiste la configurazione dell'installazione SENTINEL Fornitori.
+#
+# La registrazione della route Traefik/Let's Encrypt usa lo stesso pattern
+# reale mostrato nel file di esempio del template ns8-kickstart
+# (imageroot/actions/configure-module/20configure, rimosso da questo
+# modulo): agent.tasks.run(action='set-route', ...) sull'agente traefik@node,
+# non la scorciatoia agent.set_route() citata nella documentazione testuale.
+# Il resto (bootstrap admin, prima migrazione) va comunque collaudato su un
+# cluster reale prima della produzione.
 
 import agent
 import agent.tasks
+import base64
 import json
 import os
-import sys
+import re
 import secrets
+import sys
+import urllib.error
+import urllib.request
+
+# L'immagine applicativa NON è più dichiarata nel label
+# org.nethserver.images dell'immagine modulo (vedi build-images.sh e guida
+# §3.17): è pubblicata da una pipeline esterna a questo progetto
+# (repository GitHub "sentinel-fornitori-nis2"), con una cadenza di
+# rilascio indipendente da quella del modulo NS8, ed è un pacchetto
+# privato (serve prima "set-registry-credentials", vedi guida §3.17). Se
+# la lasciassimo nel label, NS8 deriverebbe il nome della variabile
+# d'ambiente dall'ultimo segmento del path dell'immagine reale
+# ("sentinel-fornitori-nis2" -> SENTINEL_FORNITORI_APP_IMAGE), un nome che
+# non controlliamo e che romperebbe silenziosamente sentinel-app.service/
+# update-now/check-update se mai cambiasse - qui invece lo gestiamo noi
+# stessi, e il nome resta sempre SENTINEL_FORNITORI_APP_IMAGE.
+APP_IMAGE_REPO = "ghcr.io/startappate/sentinel-fornitori-nis2"
+
+
+def resolve_latest_app_image():
+    """Interroga ghcr.io per il tag semver più recente pubblicato per
+    APP_IMAGE_REPO, usando le stesse credenziali (se presenti) di
+    check-update/10check. Chiamata solo alla primissima configurazione di
+    un'istanza (quando SENTINEL_FORNITORI_APP_IMAGE non è ancora
+    impostata): le riconfigurazioni successive non toccano più la
+    versione già installata (quella si aggiorna solo con update-now)."""
+    _registry_host, _, repo_path = APP_IMAGE_REPO.partition("/")
+    ghcr_user = os.environ.get("GHCR_PULL_USER")
+    ghcr_token = os.environ.get("GHCR_PULL_TOKEN")
+
+    def fetch_json(url, bearer=None, basic=None):
+        req = urllib.request.Request(url)
+        if bearer:
+            req.add_header("Authorization", f"Bearer {bearer}")
+        elif basic:
+            req.add_header("Authorization", f"Basic {basic}")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.load(resp)
+
+    basic_auth = None
+    if ghcr_user and ghcr_token:
+        basic_auth = base64.b64encode(f"{ghcr_user}:{ghcr_token}".encode()).decode()
+
+    token_resp = fetch_json(
+        f"https://ghcr.io/token?service=ghcr.io&scope=repository:{repo_path}:pull",
+        basic=basic_auth,
+    )
+    token = token_resp["token"]
+    tags_resp = fetch_json(f"https://ghcr.io/v2/{repo_path}/tags/list", bearer=token)
+    tags = tags_resp.get("tags", [])
+
+    semver_re = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+
+    def parse_semver(tag):
+        m = semver_re.match(tag)
+        return tuple(int(part) for part in m.groups()) if m else None
+
+    candidates = [(parse_semver(t), t) for t in tags]
+    candidates = [(v, t) for v, t in candidates if v is not None]
+    if not candidates:
+        raise RuntimeError("nessun tag semver (X.Y.Z) trovato per l'immagine app")
+    candidates.sort()
+    _, latest_tag = candidates[-1]
+    return f"{APP_IMAGE_REPO}:{latest_tag}", latest_tag
+
 
 request = json.load(sys.stdin)
 
@@ -21,6 +95,13 @@ admin_password = request.get("admin_password")
 if not domain:
     sys.exit(1)  # dominio obbligatorio
 
+# Le 4 porte TCP (app + Postgres/MinIO/ClamAV su loopback) sono già state
+# allocate automaticamente all'installazione dal label
+# org.nethserver.tcp-ports-demand=4 e sono esposte come variabile
+# TCP_PORTS (elenco separato da virgole) - non vanno richieste di nuovo a
+# runtime con agent.allocate_ports(), che è un'operazione privilegiata a
+# parte e richiede un'autorizzazione che questo modulo non ha (causava un
+# 403 Forbidden verso l'agente node).
 tcp_ports = [p.strip() for p in os.environ["TCP_PORTS"].split(",")]
 tcp_port, postgres_port, minio_port, clamav_port = tcp_ports
 
@@ -28,20 +109,45 @@ postgres_db = "sentinel"
 postgres_user = "sentinel"
 minio_bucket = "sentinel-evidence"
 
+# I segreti generati automaticamente vanno riusati tra una configure-module
+# e la successiva (idempotenza): l'immagine Postgres ufficiale usa
+# POSTGRES_PASSWORD solo alla primissima inizializzazione del volume dati,
+# non alle riesecuzioni - se qui si generasse una password diversa ogni
+# volta, una riconfigurazione successiva (es. cambio dominio dalla GUI,
+# senza toccare nient'altro) romperebbe l'autenticazione al database
+# esistente (bug reale, trovato in collaudo: "password authentication
+# failed" dopo il secondo configure-module). os.environ contiene già i
+# valori persistiti da agent.set_env() nell'esecuzione precedente.
 postgres_password = os.environ.get("POSTGRES_PASSWORD") or secrets.token_hex(32)
 session_secret = os.environ.get("SESSION_SECRET") or secrets.token_hex(48)
 minio_root_password = os.environ.get("MINIO_ROOT_PASSWORD") or secrets.token_hex(32)
 generated_admin_password = os.environ.get("ADMIN_PASSWORD") or secrets.token_urlsafe(24)
 
+# Stessa idempotenza dei segreti sopra, applicata all'immagine/versione
+# app: se questa istanza ha già un'immagine app impostata (riconfigurazione
+# successiva alla prima, es. cambio dominio) non la tocchiamo più - quella
+# si aggiorna solo esplicitamente con l'azione update-now. Solo alla
+# primissima configurazione (SENTINEL_FORNITORI_APP_IMAGE ancora assente)
+# andiamo a vedere qual è l'ultima versione pubblicata su ghcr.io e
+# partiamo da quella.
+app_image = os.environ.get("SENTINEL_FORNITORI_APP_IMAGE")
+app_version = os.environ.get("APP_VERSION")
+if not app_image:
+    app_image, app_version = resolve_latest_app_image()
+
 # I 4 container del modulo (postgres/minio/clamav/app) sono tutti sulla
 # stessa rete Podman dedicata "sentinel-net" (creata da ogni unit systemd
 # con "podman network create --ignore" in ExecStartPre, idempotente), con
 # un alias DNS per servizio uguale al nome usato in compose.yml originale
-# (postgres/minio/clamav) - cosi' l'app si connette con GLI STESSI hostname
-# del pacchetto Docker Compose, non con 127.0.0.1.
+# (postgres/minio/clamav) - così l'app si connette con GLI STESSI hostname
+# del pacchetto Docker Compose, non con 127.0.0.1: l'app gira nel proprio
+# namespace di rete, quindi "127.0.0.1"/"localhost" dentro il suo container
+# è se stessa, non l'host né gli altri container (bug reale, trovato in
+# collaudo: senza DATABASE_URL esplicita l'app cadeva sul default di "pg",
+# connessione a 127.0.0.1:5432, con ECONNREFUSED costante).
 env = {
     "RUNTIME_MODE": "docker",
-    "APP_VERSION": os.environ.get("APP_VERSION", "1.0.0"),
+    "APP_VERSION": app_version or "1.0.0",
     "APP_DOMAIN": domain,
     "CUSTOMER_NAME": customer_name or "",
     "INSTALLATION_ID": installation_id or "",
@@ -78,6 +184,13 @@ env = {
 for key, value in env.items():
     agent.set_env(key, value)
 
+# Persistita esplicitamente da noi (vedi sopra): non più derivata da un
+# label org.nethserver.images, per non dipendere dal nome che NS8
+# genererebbe dal path reale dell'immagine (che non controlliamo).
+agent.set_env("SENTINEL_FORNITORI_APP_IMAGE", app_image)
+
+# Abilita e avvia le unit systemd del modulo (Postgres/MinIO/ClamAV prima
+# dell'app, come dichiarato in sentinel-app.service con After=/Wants=).
 agent.run_helper("systemctl", "--user", "daemon-reload")
 for unit in (
     "sentinel-postgres.service",
@@ -87,12 +200,28 @@ for unit in (
 ):
     agent.run_helper("systemctl", "--user", "enable", "--now", unit)
 
-app_image = os.environ.get("SENTINEL_FORNITORI_APP_IMAGE", "")
+# Prima configurazione: applica le migrazioni e crea l'utente amministratore
+# iniziale (equivalenti di docker/migrate.mjs e docker/bootstrap-admin.mjs
+# nello stack Docker Compose originale). Le riesecuzioni successive sono
+# idempotenti quanto lo erano gli script originali.
+#
+# app_image è già stata risolta sopra (o riusata da una configurazione
+# precedente, o - alla primissima - determinata interrogando ghcr.io):
+# non è più quella passata ad add-module (quella è l'immagine "modulo",
+# scratch, veicolo per imageroot/), né viene più derivata da un label
+# org.nethserver.images (vedi guida §3.17).
 state_env_file = os.path.join(os.environ["AGENT_STATE_DIR"], "environment")
 
-# "podman run" con un tag gia' presente in locale NON lo riscarica da solo.
+# "podman run" con un tag già presente in locale NON lo riscarica da solo,
+# anche se sul registro esiste una build più recente con lo stesso tag: va
+# forzato esplicitamente, altrimenti (visto durante lo sviluppo) il
+# container continua a partire dalla vecchia immagine cache anche dopo
+# push/reinstallazioni ripetute.
 agent.run_helper("podman", "pull", app_image)
 
+# --network sentinel-net (non "container:sentinel-postgres"): questi job
+# usano DATABASE_URL con hostname "postgres", risolto dall'alias DNS sulla
+# rete condivisa - vedi commento sopra sulla costruzione di DATABASE_URL.
 agent.run_helper(
     "podman", "run", "--rm",
     "--env-file", state_env_file,
@@ -108,6 +237,11 @@ agent.run_helper(
     "node", "docker/bootstrap-admin.mjs",
 )
 
+# Registra la route HTTPS su Traefik e richiede il certificato Let's Encrypt
+# per il dominio configurato. Pattern copiato dall'esempio reale del
+# template ns8-kickstart (route by path); qui usiamo "host" invece di
+# "path" perché serviamo un dominio dedicato, non un percorso sotto il
+# dominio del nodo.
 route_response = agent.tasks.run(
     agent_id=agent.resolve_agent_id("traefik@node"),
     action="set-route",

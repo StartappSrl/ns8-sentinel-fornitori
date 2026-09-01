@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+#
+# Azione set-registry-credentials: memorizza le credenziali per il pull
+# dell'immagine applicativa privata da ghcr.io (pubblicata da una pipeline
+# esterna, non da questo modulo - vedi guida §3.16/3.17). Da invocare UNA
+# TANTUM per istanza, SOLO da terminale (mai dalla UI cluster-admin: è un
+# credenziale interno di Startapp, non un dato che il cliente deve vedere
+# o gestire):
+#
+#   api-cli run module/<id>/set-registry-credentials \
+#       -d '{"username": "<utente-o-bot-github>", "token": "<PAT-con-scope-read:packages>"}'
+#
+# Il PAT va digitato solo al momento dell'esecuzione di questo comando sul
+# terminale del server, mai incollato altrove (chat, ticket, ecc.): se è
+# mai finito da qualche parte fuori dal terminale, va revocato e
+# rigenerato prima di riusarlo qui.
+#
+# Effetto:
+# 1. "podman login" come utente di sistema del modulo (il token passa da
+#    stdin, mai come argomento di processo, per non finire in "ps"/nei
+#    log di systemd): le credenziali finiscono nell'auth.json di
+#    quell'utente, quindi da questo momento "podman pull"/
+#    "podman run --pull=newer" per QUALSIASI immagine di questo registro
+#    (comprese quelle già usate da sentinel-app.service, configure-module,
+#    update-now) si autenticano da sole, senza altre modifiche.
+# 2. Le stesse credenziali restano disponibili come variabili d'ambiente
+#    (GHCR_PULL_USER/GHCR_PULL_TOKEN) per check-update, che le usa per
+#    ottenere un token con permessi reali di lettura invece del token
+#    anonimo (che funziona solo su pacchetti pubblici).
+
+import json
+import subprocess
+import sys
+
+import agent
+
+request = json.load(sys.stdin)
+username = request["username"]
+token = request["token"]
+
+result = subprocess.run(
+    ["podman", "login", "ghcr.io", "--username", username, "--password-stdin"],
+    input=token.encode(),
+    capture_output=True,
+)
+if result.returncode != 0:
+    print(json.dumps({
+        "error": f"podman login fallito: {result.stderr.decode(errors='replace').strip()}",
+    }))
+    sys.exit(1)
+
+agent.set_env("GHCR_PULL_USER", username)
+agent.set_env("GHCR_PULL_TOKEN", token)
+
+print(json.dumps({"status": "ok"}))

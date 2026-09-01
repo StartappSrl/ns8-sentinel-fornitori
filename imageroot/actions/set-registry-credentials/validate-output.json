@@ -1,0 +1,11 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "set-registry-credentials output",
+    "$id": "http://schema.nethserver.org/sentinel-fornitori/set-registry-credentials-output.json",
+    "type": "object",
+    "properties": {
+        "status": { "type": "string", "enum": ["ok"] }
+    },
+    "required": ["status"],
+    "additionalProperties": false
+}
