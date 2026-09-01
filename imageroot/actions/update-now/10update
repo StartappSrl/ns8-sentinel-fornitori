@@ -91,6 +91,14 @@ agent.set_env("PREVIOUS_APP_VERSION", current_version)
 # 2. Scarica la nuova immagine.
 agent.run_helper("podman", "pull", *pull_extra_args, target_image)
 
+# 2b. Ricrea la rete condivisa se manca (idempotente, stesso comando che
+#     ogni ExecStartPre delle unit systemd del modulo esegue gia' da solo).
+#     Vista in collaudo: la rete rootless puo' sparire da sola se, anche
+#     solo per un istante, nessun container vi e' piu' collegato (es. un
+#     crash-loop simultaneo di piu' servizi) - senza questo passo, il
+#     comando seguente fallirebbe con "network not found".
+agent.run_helper("podman", "network", "create", "--ignore", "sentinel-net")
+
 # 3. Applica le migrazioni con la nuova immagine (stesso comando gia' usato
 #    in configure-module/10configure), PRIMA di toccare il servizio in
 #    esecuzione.
